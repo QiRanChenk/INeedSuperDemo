@@ -221,12 +221,10 @@ $('#stpTest').onclick = async () => {
   catch (e) { $('#stpResult').textContent = '✗ ' + e.message; }
 };
 function toggleSettings(open) {
-  const panel = $('#settingsPanel');
-  const show = open ?? panel.hidden;
-  panel.hidden = !show;
-  $('#openSettings').classList.toggle('open', show);
-  localStorage.setItem('sd.settingsOpen', show ? '1' : '0');
-  if (show) $('#stResult').textContent = '';
+  const dlg = $('#settingsPanel');
+  const show = open ?? !dlg.open;
+  if (show) { $('#stResult').textContent = ''; $('#stpResult').textContent = ''; if (!dlg.open) dlg.showModal(); }
+  else if (dlg.open) dlg.close();
 }
 async function saveSettings() {
   const body = { baseUrl: $('#stBase').value, model: $('#stModel').value, temperature: $('#stTemp').value, maxIterations: $('#stIter').value, projectLlm: collectProjectLlm() };
@@ -243,7 +241,7 @@ $('#stTest').onclick = async () => {
   try { await saveSettings(); const r = await api('/api/settings/test', { method: 'POST' }); $('#stResult').textContent = `✓ 连接成功 ${r.ms}ms，回复: ${r.reply}`; }
   catch (e) { $('#stResult').textContent = '✗ ' + e.message; }
 };
-$('#openSettings').onclick = () => toggleSettings();
+$('#openSettings').onclick = async () => { await loadSettings(); toggleSettings(true); };
 $('#stClose').onclick = () => toggleSettings(false);
 
 // ---------- new project ----------
@@ -309,7 +307,6 @@ const firstLine = s => String(s ?? '').split('\n')[0].replace(/^\[系统\]\s*/, 
   await loadProjects();
   if (projects.length) await select(projects[0].id);
   renderHeader();
-  const open = localStorage.getItem('sd.settingsOpen');
-  if (open === '1' || (open === null && !settings.hasKey)) toggleSettings(true);
+  if (!settings.hasKey) toggleSettings(true);
   setInterval(loadProjects, 5000);
 })();

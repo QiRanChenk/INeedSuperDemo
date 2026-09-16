@@ -69,10 +69,10 @@
   </form>
 </dialog>
 
-<!-- settings: fixed, non-modal panel anchored above the sidebar button -->
-<div id="settingsPanel" class="settings" hidden>
+<!-- settings: modal dialog -->
+<dialog id="settingsPanel" class="settings-dlg">
   <form class="dlg">
-    <div class="row between"><h3>模型设置 <span class="muted small">OpenAI 兼容协议</span></h3><button type="button" id="stClose" class="ghost">收起</button></div>
+    <div class="row between"><h3>模型设置 <span class="muted small">OpenAI 兼容协议</span></h3><button type="button" id="stClose" class="ghost">关闭</button></div>
     <label>预设<select id="stPreset"></select></label>
     <label>Base URL<input id="stBase" placeholder="https://api.deepseek.com"></label>
     <label>Model<input id="stModel" placeholder="deepseek-chat"></label>
@@ -94,7 +94,7 @@
     <div id="stpResult" class="small muted"></div>
     <div class="row end"><button type="button" id="stpTest" class="ghost">保存并测试项目侧连接</button></div>
   </form>
-</div>
+</dialog>
 
 <!-- logs / files drawer -->
 <dialog id="dlgPanel">

@@ -45,10 +45,9 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
 .panel a { color: var(--brand); cursor: pointer; text-decoration: none; }
 .thinking { display: inline-block; animation: pulse 1.2s infinite; } @keyframes pulse { 50% { opacity: .4; } }
 
-/* fixed settings panel */
-.settings { position: fixed; left: 250px; bottom: 12px; width: 440px; max-height: calc(100vh - 24px); overflow: auto; z-index: 50;
-  background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,.5); }
-.settings .dlg { padding: 16px; gap: 10px; } .settings h3 { font-size: 15px; }
+/* settings modal */
+.settings-dlg { width: 480px; max-height: calc(100vh - 48px); overflow: auto; }
+.settings-dlg .dlg { padding: 20px; gap: 10px; } .settings-dlg h3 { font-size: 15px; }
 .settings-btn { display: flex; align-items: center; gap: 8px; justify-content: flex-start; overflow: hidden; }
 .settings-btn #llmLabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .settings-btn .badge { margin: 0; flex: none; }
@@ -69,7 +68,10 @@ body.no-preview { grid-template-columns: 240px 1fr; } body.no-preview #preview {
 .gh-link { display: flex; align-items: center; gap: 8px; color: var(--muted); margin-top: 0; margin-bottom: 12px; }
 .gh-link:hover { color: var(--ink); background: var(--panel); }
 
-.settings h4 { margin: 0; font-size: 13px; color: var(--ink); }
+.settings-dlg h4 { margin: 0; font-size: 13px; color: var(--ink); }
 .sep-line { border: none; border-top: 1px solid var(--line); margin: 4px 0; }
 .dlg label.check { flex-direction: row; align-items: center; gap: 8px; color: var(--ink); cursor: pointer; }
 .subfields { display: flex; flex-direction: column; gap: 10px; padding-left: 10px; border-left: 2px solid var(--line); }
+
+/* author display rules must not override the hidden attribute */
+[hidden] { display: none !important; }
