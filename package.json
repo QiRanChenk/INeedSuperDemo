@@ -1,0 +1,17 @@
+{
+  "name": "superdemo",
+  "version": "0.1.0",
+  "description": "SuperDemo maker - an AI agent shell that creates, runs and evolves demo projects",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node shell/server.js",
+    "dev": "node --watch-path=shell shell/server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

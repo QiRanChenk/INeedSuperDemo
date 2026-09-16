@@ -1,0 +1,5 @@
+node_modules/
+projects/
+data/settings.json
+.env
+.DS_Store

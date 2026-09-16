@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SuperDemo 制造器</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E⚡%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<aside id="sidebar">
+  <div class="brand">⚡ SuperDemo <span class="ver">v0.1</span></div>
+  <button id="newProject" class="primary wide">+ 新建项目</button>
+  <ul id="projectList" class="plist"></ul>
+  <div class="spacer"></div>
+  <button id="openSettings" class="ghost wide settings-btn"><span id="llmBadge" class="badge"></span><span id="llmLabel">⚙ 模型设置</span></button>
+  <a class="ghost wide btn gh-link" href="https://github.com/QiRanChenk/INeedSuperDemo" target="_blank" rel="noopener" title="GitHub 仓库：QiRanChenk/INeedSuperDemo">
+    <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+    <span>GitHub · 开源仓库</span>
+  </a>
+</aside>
+
+<section id="chat">
+  <header>
+    <div>
+      <div id="pName" class="pname">选择或新建一个项目</div>
+      <div id="pMeta" class="muted small"></div>
+    </div>
+    <div class="actions">
+      <button id="btnToggle" class="ghost" title="启动/停止">■ 停止</button>
+      <button id="btnRestart" class="ghost" title="重启">↻</button>
+      <button id="btnLogs" class="ghost" title="日志">日志</button>
+      <button id="btnFiles" class="ghost" title="文件">文件</button>
+      <button id="btnClear" class="ghost" title="清空对话">清空</button>
+      <button id="btnDelete" class="ghost danger" title="删除项目">删除</button>
+    </div>
+  </header>
+  <div id="messages" class="messages"></div>
+  <form id="composer" class="composer">
+    <textarea id="input" rows="3" placeholder="告诉 AI 你想让这个项目变成什么样…（Enter 发送，Shift+Enter 换行）"></textarea>
+    <button id="send" class="primary">发送</button>
+  </form>
+  <div id="usage" class="usage" hidden>
+    <div class="urow"><span class="ulabel">本会话</span><span id="uSession"></span></div>
+    <div class="urow"><span class="ulabel">项目累计</span><span id="uProject"></span></div>
+  </div>
+</section>
+
+<section id="preview">
+  <header>
+    <span class="muted small" id="previewUrl">预览</span>
+    <div class="actions">
+      <button id="btnReload" class="ghost">刷新</button>
+      <a id="btnOpen" class="ghost btn" target="_blank">新窗口打开 ↗</a>
+    </div>
+  </header>
+  <iframe id="frame" src="about:blank"></iframe>
+</section>
+
+<!-- new project dialog -->
+<dialog id="dlgNew">
+  <form method="dialog" class="dlg">
+    <h3>新建项目</h3>
+    <label>项目名称<input id="npName" required placeholder="例如：门店销售看板"></label>
+    <label>项目类型<select id="npType"></select></label>
+    <label>你想做什么？（可选，AI 会在创建后立即按此改造）
+      <textarea id="npDesc" rows="4" placeholder="例如：一个帮销售经理看各地区业绩、找出下滑产品并给出建议的小工具"></textarea></label>
+    <div class="row end"><button value="cancel" class="ghost">取消</button><button id="npOk" value="ok" class="primary">创建并运行</button></div>
+  </form>
+</dialog>
+
+<!-- settings: fixed, non-modal panel anchored above the sidebar button -->
+<div id="settingsPanel" class="settings" hidden>
+  <form class="dlg">
+    <div class="row between"><h3>模型设置 <span class="muted small">OpenAI 兼容协议</span></h3><button type="button" id="stClose" class="ghost">收起</button></div>
+    <label>预设<select id="stPreset"></select></label>
+    <label>Base URL<input id="stBase" placeholder="https://api.deepseek.com"></label>
+    <label>Model<input id="stModel" placeholder="deepseek-chat"></label>
+    <label>API Key<input id="stKey" type="password" placeholder="sk-…（留空保持不变）" autocomplete="off"></label>
+    <div class="row"><label class="inline">Temperature<input id="stTemp" type="number" step="0.1" min="0" max="2"></label>
+      <label class="inline">最大迭代<input id="stIter" type="number" min="1" max="100"></label></div>
+    <div id="stResult" class="small muted"></div>
+    <div class="row end"><button type="button" id="stTest" class="ghost">保存并测试连接</button><button type="submit" class="primary">保存</button></div>
+  </form>
+</div>
+
+<!-- logs / files drawer -->
+<dialog id="dlgPanel">
+  <div class="dlg wide">
+    <div class="row between"><h3 id="panelTitle">日志</h3><button id="panelClose" class="ghost">关闭</button></div>
+    <pre id="panelBody" class="panel"></pre>
+  </div>
+</dialog>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>数据洞察助手</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1 id="title">数据洞察助手</h1>
+  <p class="sub">选择数据源，提出问题，AI 帮你读懂数据并给出建议</p>
+</header>
+
+<main>
+  <section class="card">
+    <h2>1. 数据源</h2>
+    <div class="row">
+      <select id="source"></select>
+      <button id="reload" class="ghost">刷新</button>
+      <label class="upload">上传 CSV/JSON <input type="file" id="file" accept=".csv,.json" hidden></label>
+    </div>
+    <div id="preview" class="preview muted">尚未加载数据</div>
+  </section>
+
+  <section class="card">
+    <h2>2. 你想了解什么？</h2>
+    <textarea id="question" rows="2" placeholder="例如：哪个地区最值得加大投入？最近有什么异常？"></textarea>
+    <div class="row">
+      <input id="context" placeholder="业务背景（可选），如：这是饮料公司 2024 年销售数据">
+    </div>
+    <div id="directions" class="chips"></div>
+    <div class="row">
+      <button id="analyze" class="primary">开始分析</button>
+      <span id="status" class="muted"></span>
+    </div>
+  </section>
+
+  <section class="card" id="resultCard" hidden>
+    <h2>3. 分析结果</h2>
+    <article id="result" class="md"></article>
+  </section>
+
+  <section class="card">
+    <h2>历史分析 <span class="muted small">（存于项目数据库 data/app.db）</span></h2>
+    <ul id="history" class="hist muted">暂无</ul>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
