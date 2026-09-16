@@ -7,6 +7,7 @@ import * as runner from './runner.js';
 import { proxyMiddleware } from './proxy.js';
 import { testConnection } from './llm.js';
 import { runAgent, isBusy, usageSummary, generateProjectName } from './agent.js';
+import { summary as usageLogSummary, readLog, backfillIfNeeded } from './usagelog.js';
 import { listSessions, createSession, renameSession, deleteSession, setCurrentSession, loadHistory, clearHistory } from './sessions.js';
 
 const app = express();
@@ -104,6 +105,15 @@ app.get('/api/projects/:id/history', wrap((req, res) => res.json(loadHistory(req
 app.get('/api/projects/:id/usage', wrap((req, res) => res.json(usageSummary(req.params.id, sid(req)))));
 app.delete('/api/projects/:id/history', wrap((req, res) => { clearHistory(req.params.id, sid(req)); res.json({ ok: true }); }));
 
+// ---- shell-wide token usage log ----
+app.get('/api/usage/summary', wrap((req, res) => res.json(usageLogSummary())));
+app.get('/api/usage/log', wrap((req, res) => {
+  const from = Number(req.query.from) || 0, to = Number(req.query.to) || Date.now();
+  const names = Object.fromEntries(listProjects().map(p => [p.id, p.name]));
+  names._naming = '项目起名';
+  res.json({ from, to, entries: readLog(from, to), names });
+}));
+
 // ---- sessions ----
 app.get('/api/projects/:id/sessions', wrap((req, res) => res.json(listSessions(req.params.id))));
 app.post('/api/projects/:id/sessions', wrap((req, res) => res.json(createSession(req.params.id, req.body?.title))));
@@ -135,6 +145,7 @@ app.post('/api/projects/:id/chat', wrap(async (req, res) => {
 
 // ---- boot ----
 async function boot() {
+  const n = backfillIfNeeded(); if (n) console.log(`[boot] token usage log backfilled: ${n} entries`);
   const projects = listProjects();
   for (const p of projects) if (p.autoStart !== false) runner.start(p.id).catch(e => console.error(`[boot] ${p.id}:`, e.message));
   app.listen(PORT, () => {

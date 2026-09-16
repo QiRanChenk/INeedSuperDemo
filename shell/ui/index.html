@@ -13,6 +13,10 @@
   <button id="newProject" class="primary wide">+ 新建项目</button>
   <ul id="projectList" class="plist"></ul>
   <div class="spacer"></div>
+  <button id="tokenStats" class="ghost wide stats-btn" title="点击查看 Token 消耗趋势">
+    <div class="srow"><span class="muted">今日 Token</span><b id="tsToday">—</b></div>
+    <div class="srow"><span class="muted">累计 Token</span><b id="tsAll">—</b></div>
+  </button>
   <button id="openSettings" class="ghost wide settings-btn"><span id="llmBadge" class="badge"></span><span id="llmLabel">⚙ 模型设置</span></button>
   <a class="ghost wide btn gh-link" href="https://github.com/QiRanChenk/INeedSuperDemo" target="_blank" rel="noopener" title="GitHub 仓库：QiRanChenk/INeedSuperDemo">
     <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
@@ -75,7 +79,7 @@
       <div class="row"><input id="npName" maxlength="40" placeholder="留空自动生成"><button type="button" id="npGen" class="ghost" title="用 AI 生成名称">✨ 生成</button></div></label>
     <label>项目类型<select id="npType"></select></label>
     <div id="npStatus" class="small muted"></div>
-    <div class="row end"><button value="cancel" class="ghost">取消</button><button id="npOk" value="ok" class="primary">创建并运行</button></div>
+    <div class="row end"><button value="cancel" class="ghost" formnovalidate>取消</button><button id="npOk" value="ok" class="primary">创建并运行</button></div>
   </form>
 </dialog>
 
@@ -106,6 +110,32 @@
   </form>
 </dialog>
 
+<!-- token usage chart -->
+<dialog id="dlgUsage" class="usage-dlg">
+  <div class="dlg wide">
+    <div class="row between"><h3>Token 消耗</h3><button id="usClose" class="ghost">关闭</button></div>
+    <div class="row wrap" id="usQuick">
+      <button data-r="today" class="ghost">今日</button><button data-r="yesterday" class="ghost">昨天</button>
+      <button data-r="7d" class="ghost">7 天</button><button data-r="week" class="ghost">本周</button>
+      <button data-r="30d" class="ghost">30 天</button><button data-r="month" class="ghost">本月</button>
+      <button data-r="year" class="ghost">今年</button><button data-r="lastyear" class="ghost">去年</button>
+      <button data-r="all" class="ghost">全部</button>
+      <span class="spacer"></span>
+      <label class="inline-date">从 <input type="date" id="usFrom"></label>
+      <label class="inline-date">到 <input type="date" id="usTo"></label>
+    </div>
+    <div class="row wrap" id="usTotals"></div>
+    <div class="row wrap legend" id="usLegend">
+      <label><input type="checkbox" data-s="total" checked><i style="--c:#3987e5"></i>合计</label>
+      <label><input type="checkbox" data-s="input"><i style="--c:#d95926"></i>输入</label>
+      <label><input type="checkbox" data-s="output"><i style="--c:#199e70"></i>输出</label>
+      <span class="muted small" id="usBucket"></span>
+    </div>
+    <div id="usChart" class="chart"><div id="usTip" class="tip" hidden></div></div>
+    <table class="ustable" id="usTable"></table>
+  </div>
+</dialog>
+
 <!-- logs / files drawer -->
 <dialog id="dlgPanel">
   <div class="dlg wide">
@@ -113,6 +143,7 @@
     <pre id="panelBody" class="panel"></pre>
   </div>
 </dialog>
+<script src="usage.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -221,7 +221,7 @@ async function send(text) {
 function handleEvent(pid, ev) {
   switch (ev.type) {
     case 'thinking': showThinking(pid, `思考中… (第 ${ev.iteration} 轮)`); break;
-    case 'usage': renderUsage(pid, ev); break;
+    case 'usage': renderUsage(pid, ev); UsageDialog.refreshSummary(); break;
     case 'context': if (viewKey() === pid) $('#uContext').innerHTML = `≈ <b>${fmt(Math.round(ev.chars / 3))}</b> tokens · ${ev.messages} 条消息${ev.compacted ? ` · 已压缩 ${ev.compacted} 条旧记录` : ''}`; break;
     case 'reasoning': addReasoning(pid, ev.content); break;
     case 'text': addMsg(pid, 'assistant', ev.content); break;
@@ -368,7 +368,11 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '
 const safeParse = s => { try { return JSON.parse(s); } catch { return {}; } };
 const firstLine = s => String(s ?? '').split('\n')[0].replace(/^\[系统\]\s*/, '↻ ').slice(0, 120);
 
+$('#tokenStats').onclick = () => UsageDialog.open('today');
+
 (async () => {
+  UsageDialog.refreshSummary();
+  setInterval(() => UsageDialog.refreshSummary(), 60000);
   await loadSettings();
   await loadProjects();
   if (projects.length) await select(projects[0].id);
