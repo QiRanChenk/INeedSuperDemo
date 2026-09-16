@@ -69,9 +69,9 @@
 <dialog id="dlgNew">
   <form method="dialog" class="dlg">
     <h3>新建项目</h3>
-    <label>你想做什么？<span class="req">*</span>（AI 会在创建后立即按此改造）
+    <label><span class="lbl">你想做什么？<span class="req">*</span><span class="muted">AI 会在创建后立即按此改造</span></span>
       <textarea id="npDesc" rows="4" required placeholder="例如：一个帮销售经理看各地区业绩、找出下滑产品并给出建议的小工具"></textarea></label>
-    <label>项目名称<span class="muted">（可留空，AI 根据描述生成，不超过 10 字）</span>
+    <label><span class="lbl">项目名称<span class="muted">可留空，AI 根据描述生成，不超过 10 字</span></span>
       <div class="row"><input id="npName" maxlength="40" placeholder="留空自动生成"><button type="button" id="npGen" class="ghost" title="用 AI 生成名称">✨ 生成</button></div></label>
     <label>项目类型<select id="npType"></select></label>
     <div id="npStatus" class="small muted"></div>

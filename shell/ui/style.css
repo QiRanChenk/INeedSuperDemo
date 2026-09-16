@@ -82,3 +82,4 @@ body.no-preview { grid-template-columns: 240px 1fr; } body.no-preview #preview {
 .sessionbar button { padding: 4px 8px; white-space: nowrap; }
 .req { color: var(--danger); margin: 0 4px; }
 .dlg label .row { margin-bottom: 0; } .dlg label .row input { flex: 1; }
+.dlg .lbl { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; } .dlg .lbl .muted { font-size: 12px; }
