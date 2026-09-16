@@ -5,6 +5,8 @@ import { chat } from './llm.js';
 import { getSettings, SDK_DIR } from './config.js';
 import { readProject, projectDir, safePath, fileTree } from './registry.js';
 import { restart, logs } from './runner.js';
+import { loadHistory, saveHistory, resolveSession } from './sessions.js';
+export { loadHistory, clearHistory } from './sessions.js';
 
 const TOOLS = [
   tool('list_files', '列出项目目录树（相对项目根目录）', { path: { type: 'string', description: '相对路径，默认 "."' } }),
@@ -19,19 +21,6 @@ const TOOLS = [
 function tool(name, description, props, required = []) {
   return { type: 'function', function: { name, description, parameters: { type: 'object', properties: props, required } } };
 }
-
-function historyFile(id) { return path.join(projectDir(id), '.superdemo', 'history.json'); }
-
-export function loadHistory(id) {
-  try { return JSON.parse(fs.readFileSync(historyFile(id), 'utf8')); } catch { return []; }
-}
-
-function saveHistory(id, history) {
-  fs.mkdirSync(path.dirname(historyFile(id)), { recursive: true });
-  fs.writeFileSync(historyFile(id), JSON.stringify(history, null, 2));
-}
-
-export function clearHistory(id) { saveHistory(id, []); }
 
 // ---- token usage ----
 function usageFile(id) { return path.join(projectDir(id), '.superdemo', 'usage.json'); }
@@ -56,13 +45,49 @@ function recordProjectUsage(id, u) {
   fs.writeFileSync(usageFile(id), JSON.stringify(acc));
   return acc;
 }
-/** Session usage = sum over the current (un-cleared) history. */
-export function sessionUsage(id) {
+/** Session usage = sum over one session's history. */
+export function sessionUsage(id, sid) {
   const acc = emptyUsage();
-  for (const m of loadHistory(id)) if (m.usage) addUsage(acc, m.usage);
+  for (const m of loadHistory(id, sid)) if (m.usage) addUsage(acc, m.usage);
   return acc;
 }
-export function usageSummary(id) { return { session: sessionUsage(id), project: loadProjectUsage(id) }; }
+export function usageSummary(id, sid) { return { session: sessionUsage(id, sid), project: loadProjectUsage(id) }; }
+
+// ---- context compaction ----
+// Full detail is kept for the current and previous turn; older tool results / file contents are collapsed to one line.
+// A turn = one user message and everything the agent did in response.
+const KEEP_FULL_TURNS = 2;
+const SOFT_LIMIT_CHARS = 240_000; // ~80k tokens; beyond this even the previous turn is compacted
+
+export function compactHistory(history) {
+  let turn = 0;
+  const turnOf = history.map(m => (m.role === 'user' && !m.system) ? ++turn : turn);
+  const build = keep => history.map((m, i) => strip(turn - turnOf[i] < keep ? m : compactMessage(m)));
+  let out = build(KEEP_FULL_TURNS);
+  if (JSON.stringify(out).length > SOFT_LIMIT_CHARS) out = build(1);
+  const compacted = out.filter(m => m._compacted).length;
+  for (const m of out) delete m._compacted;
+  return { messages: out, compacted, chars: JSON.stringify(out).length };
+}
+
+function compactMessage(m) {
+  if (m.role === 'tool') {
+    const c = String(m.content ?? '');
+    if (c.length <= 160) return m;
+    return { ...m, _compacted: true, content: `[旧结果已省略，原 ${c.length} 字符] ${c.split('\n')[0].slice(0, 120)}` };
+  }
+  if (m.role === 'assistant' && m.tool_calls) {
+    let changed = false;
+    const tool_calls = m.tool_calls.map(tc => {
+      let args; try { args = JSON.parse(tc.function.arguments || '{}'); } catch { return tc; }
+      if (typeof args.content === 'string' && args.content.length > 200) { args.content = `<已省略 ${args.content.length} 字符>`; changed = true; }
+      return { ...tc, function: { ...tc.function, arguments: JSON.stringify(args) } };
+    });
+    return changed ? { ...m, _compacted: true, tool_calls } : m;
+  }
+  if (m.role === 'user' && m.system) return { ...m, _compacted: true, content: String(m.content).split('\n')[0] };
+  return m;
+}
 
 const running = new Set();
 export function isBusy(id) { return running.has(id); }
@@ -154,25 +179,32 @@ function runCommand(cwd, command) {
  * Run one agent turn: user message -> tool loop -> final assistant text.
  * onEvent receives { type, ... } events for the UI stream.
  */
-export async function runAgent(id, userMessage, onEvent) {
+export async function runAgent(id, userMessage, onEvent, sessionId) {
   const project = readProject(id);
   if (!project) throw new Error('project not found');
   if (running.has(id)) throw new Error('该项目正在处理上一条消息');
   running.add(id);
-  try { return await runAgentInner(project, userMessage, onEvent); }
+  try { return await runAgentInner(project, userMessage, onEvent, resolveSession(id, sessionId)); }
   finally { running.delete(id); }
 }
 
-async function runAgentInner(project, userMessage, onEvent) {
+async function runAgentInner(project, userMessage, onEvent, sid) {
   const id = project.id;
   const settings = getSettings();
-  const history = loadHistory(id);
+  const history = loadHistory(id, sid);
   const ctx = { changed: new Set() };
-  // persist after every message so the UI can replay an in-progress turn when switching projects
-  const push = m => { history.push(m); saveHistory(id, history); };
+  // persist after every message so the UI can replay an in-progress turn when switching projects/sessions
+  const push = m => { history.push(m); saveHistory(id, sid, history); };
 
   push({ role: 'user', content: userMessage, ts: Date.now() });
-  const messages = [{ role: 'system', content: systemPrompt(project) }, ...history.map(strip)];
+  const system = { role: 'system', content: systemPrompt(project) };
+  let messages = [];
+  const rebuild = () => {
+    const c = compactHistory(history);
+    messages = [system, ...c.messages];
+    onEvent({ type: 'context', session: sid, messages: messages.length, compacted: c.compacted, chars: c.chars + system.content.length });
+  };
+  rebuild();
 
   let finalText = '';
   for (let i = 0; i < settings.maxIterations; i++) {
@@ -200,9 +232,7 @@ async function runAgentInner(project, userMessage, onEvent) {
       try { result = await execTool(project, tc.function.name, args, ctx); }
       catch (e) { result = 'ERROR: ' + e.message; }
       onEvent({ type: 'tool_result', name: tc.function.name, preview: String(result).slice(0, 300) });
-      const toolMsg = { role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: String(result), ts: Date.now() };
-      messages.push(strip(toolMsg));
-      push(toolMsg);
+      push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: String(result), ts: Date.now() });
     }
 
     // Auto restart after a batch of file changes so the model sees the effect.
@@ -212,13 +242,13 @@ async function runAgentInner(project, userMessage, onEvent) {
       ctx.changed.clear();
       onEvent({ type: 'restarted', status: st.status });
       const note = { role: 'user', content: `[系统] 项目已自动重启，状态=${st.status}。最近日志:\n${formatLogs(id, 25)}\n${st.status === 'running' ? '若已完成，请向用户总结；否则继续修复。' : '启动失败，请读取日志修复。'}`, ts: Date.now(), system: true };
-      messages.push(strip(note));
       push(note);
     }
+    rebuild();
   }
 
   if (!finalText) { finalText = '（已达到最大迭代次数，停止。你可以继续对话让我接着做。）'; push({ role: 'assistant', content: finalText, ts: Date.now() }); }
-  onEvent({ type: 'done', content: finalText });
+  onEvent({ type: 'done', session: sid, content: finalText });
   return finalText;
 }
 

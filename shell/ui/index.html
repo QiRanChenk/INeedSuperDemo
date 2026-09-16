@@ -35,6 +35,13 @@
       <button id="btnDelete" class="ghost danger" title="删除项目">删除</button>
     </div>
   </header>
+  <div id="sessionBar" class="sessionbar" hidden>
+    <span class="muted small">会话</span>
+    <select id="sessionSel" title="切换会话"></select>
+    <button id="btnNewSession" class="ghost" title="开始一个新会话（项目代码共享，对话记忆独立）">+ 新会话</button>
+    <button id="btnRenameSession" class="ghost" title="重命名">✎</button>
+    <button id="btnDeleteSession" class="ghost danger" title="删除会话">🗑</button>
+  </div>
   <div id="messages" class="messages"></div>
   <form id="composer" class="composer">
     <textarea id="input" rows="3" placeholder="告诉 AI 你想让这个项目变成什么样…（Enter 发送，Shift+Enter 换行）"></textarea>
@@ -43,6 +50,7 @@
   <div id="usage" class="usage" hidden>
     <div class="urow"><span class="ulabel">本会话</span><span id="uSession"></span></div>
     <div class="urow"><span class="ulabel">项目累计</span><span id="uProject"></span></div>
+    <div class="urow"><span class="ulabel">上下文</span><span id="uContext" class="muted">—</span></div>
   </div>
 </section>
 

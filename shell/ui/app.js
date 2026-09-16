@@ -1,5 +1,9 @@
 const $ = s => document.querySelector(s);
 let projects = [], current = null, settings = null;
+let currentSession = null;   // active session id of the current project
+let sessions = [];
+const viewKey = () => current ? `${current.id}:${currentSession}` : '';
+const sameProject = key => !!current && String(key).split(':')[0] === current.id;
 const streams = new Map();   // projectId -> true while this tab holds an open SSE stream
 const wasBusy = new Map();   // projectId -> last known server busy flag
 
@@ -40,8 +44,58 @@ async function select(id) {
   $('#frame').src = current.hasUi && live ? url : 'about:blank';
   $('#previewUrl').textContent = url;
   $('#btnOpen').href = url;
+  await loadSessions();
   await Promise.all([loadHistory(), loadUsage()]);
 }
+
+// ---------- sessions ----------
+async function loadSessions(keep = false) {
+  if (!current) { $('#sessionBar').hidden = true; return; }
+  const pid = current.id;
+  const data = await api(`/api/projects/${pid}/sessions`);
+  if (current?.id !== pid) return;
+  sessions = data.list;
+  if (!keep || !sessions.some(s => s.id === currentSession)) currentSession = data.current;
+  const sel = $('#sessionSel'); sel.innerHTML = '';
+  for (const s of [...sessions].reverse()) {
+    const o = document.createElement('option'); o.value = s.id;
+    o.textContent = `${s.title}${s.messages ? ` · ${s.messages} 条` : ''}`;
+    sel.appendChild(o);
+  }
+  sel.value = currentSession;
+  $('#sessionBar').hidden = false;
+}
+async function switchSession(sid) {
+  if (!current || sid === currentSession) return;
+  currentSession = sid;
+  await api(`/api/projects/${current.id}/sessions/${sid}/activate`, { method: 'POST' });
+  $('#sessionSel').value = sid;
+  await Promise.all([loadHistory(), loadUsage()]);
+}
+$('#sessionSel').onchange = e => switchSession(e.target.value);
+$('#btnNewSession').onclick = async () => {
+  if (!current) return;
+  const s = await api(`/api/projects/${current.id}/sessions`, { method: 'POST', body: {} });
+  currentSession = s.id;
+  await loadSessions(true);
+  await Promise.all([loadHistory(), loadUsage()]);
+  $('#input').focus();
+};
+$('#btnRenameSession').onclick = async () => {
+  const s = sessions.find(x => x.id === currentSession); if (!s) return;
+  const title = prompt('会话名称', s.title); if (title === null || !title.trim()) return;
+  await api(`/api/projects/${current.id}/sessions/${currentSession}`, { method: 'PATCH', body: { title: title.trim() } });
+  await loadSessions(true);
+};
+$('#btnDeleteSession').onclick = async () => {
+  const s = sessions.find(x => x.id === currentSession); if (!s) return;
+  if (isBusy(current)) return alert('该项目正在处理消息，稍后再删除');
+  if (!confirm(`删除会话「${s.title}」及其对话记录？项目代码不受影响。`)) return;
+  const r = await api(`/api/projects/${current.id}/sessions/${currentSession}`, { method: 'DELETE' });
+  currentSession = r.current;
+  await loadSessions(true);
+  await Promise.all([loadHistory(), loadUsage()]);
+};
 
 // ---------- token usage ----------
 const fmt = n => n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e4 ? (n / 1e3).toFixed(1) + 'k' : String(n);
@@ -51,15 +105,15 @@ function usageLine(u) {
   return `输入 <b>${fmt(u.input)}</b> <span class="sep">·</span> 输出 <b>${fmt(u.output)}</b> <span class="sep">·</span> 缓存命中 <b>${hit}%</b> <span class="sep">·</span> 合计 <b>${fmt(u.total)}</b> <span class="sep">·</span> ${u.calls} 次调用`;
 }
 function renderUsage(pid, data) {
-  if (current?.id !== pid) return;
+  if (viewKey() !== pid) return;
   $('#usage').hidden = false;
   $('#uSession').innerHTML = usageLine(data.session);
   $('#uProject').innerHTML = usageLine(data.project);
 }
 async function loadUsage() {
   if (!current) { $('#usage').hidden = true; return; }
-  const pid = current.id;
-  try { renderUsage(pid, await api(`/api/projects/${pid}/usage`)); } catch {}
+  const pid = viewKey();
+  try { renderUsage(pid, await api(`/api/projects/${current.id}/usage?session=${encodeURIComponent(currentSession || '')}`)); } catch {}
 }
 
 function renderHeader() {
@@ -82,9 +136,9 @@ function renderHeader() {
 /** Full replay of the persisted history, including the thinking process (tool calls, results, restarts, reasoning). */
 async function loadHistory() {
   if (!current) return;
-  const pid = current.id;
-  const hist = await api(`/api/projects/${pid}/history`);
-  if (current?.id !== pid) return; // switched while fetching
+  const pid = viewKey();
+  const hist = await api(`/api/projects/${current.id}/history?session=${encodeURIComponent(currentSession || '')}`);
+  if (viewKey() !== pid) return; // switched while fetching
   const box = $('#messages'); box.innerHTML = '';
   for (const m of hist) {
     if (m.role === 'user') { m.system ? addSys(pid, firstLine(m.content)) : addMsg(pid, 'user', m.content); continue; }
@@ -96,15 +150,16 @@ async function loadHistory() {
     }
     if (m.role === 'tool') addToolResult(pid, m.name, m.content);
   }
-  if (!hist.length) addSys(pid, '项目已就绪。右侧是实时预览，在下方告诉 AI 你想怎么改，它会边改边重启。');
+  if (!hist.length) addSys(pid, '新会话。项目代码与其他会话共享，对话记忆从这里重新开始。');
   if (isBusy(current)) showThinking(pid, '处理中…');
+  $('#uContext').textContent = '—';
   box.scrollTop = box.scrollHeight;
 }
 
 // ---------- rendering (all bound to a project id; ignored if the user switched away) ----------
 /** Append and auto-scroll: follows new content unless the user has scrolled up to read history. */
 function append(pid, el, force = false) {
-  if (current?.id !== pid) return el;
+  if (viewKey() !== pid) return el;
   const box = $('#messages');
   const follow = force || box.scrollHeight - box.scrollTop - box.clientHeight < 120;
   const t = $('#thinking'); t ? box.insertBefore(el, t) : box.appendChild(el);
@@ -130,24 +185,24 @@ function addReasoning(pid, text) {
   return append(pid, d);
 }
 function showThinking(pid, text) {
-  if (current?.id !== pid) return;
+  if (viewKey() !== pid) return;
   let t = $('#thinking');
   if (!t) { t = document.createElement('div'); t.id = 'thinking'; t.className = 'msg sys thinking'; $('#messages').appendChild(t); }
   t.textContent = text;
   const box = $('#messages'); if (box.scrollHeight - box.scrollTop - box.clientHeight < 160) box.scrollTop = box.scrollHeight;
 }
-function hideThinking(pid) { if (current?.id === pid) $('#thinking')?.remove(); }
+function hideThinking(pid) { if (viewKey() === pid) $('#thinking')?.remove(); }
 
 // ---------- chat ----------
 async function send(text) {
   if (!current || isBusy(current) || !text.trim()) return;
-  const pid = current.id;
-  streams.set(pid, true); renderHeader();
+  const projectId = current.id, sid = currentSession, pid = viewKey();
+  streams.set(projectId, true); renderHeader();
   addMsg(pid, 'user', text);
   $('#input').value = '';
   showThinking(pid, '思考中…');
   try {
-    const res = await fetch(`/api/projects/${pid}/chat`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: text }) });
+    const res = await fetch(`/api/projects/${projectId}/chat`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: text, session: sid }) });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
     const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '';
     while (true) {
@@ -160,20 +215,21 @@ async function send(text) {
       }
     }
   } catch (e) { addMsg(pid, 'error', e.message); }
-  finally { streams.delete(pid); wasBusy.set(pid, false); hideThinking(pid); renderHeader(); loadProjects(); }
+  finally { streams.delete(projectId); wasBusy.set(projectId, false); hideThinking(pid); renderHeader(); loadProjects(); if (sameProject(pid)) loadSessions(true); }
 }
 
 function handleEvent(pid, ev) {
   switch (ev.type) {
     case 'thinking': showThinking(pid, `思考中… (第 ${ev.iteration} 轮)`); break;
     case 'usage': renderUsage(pid, ev); break;
+    case 'context': if (viewKey() === pid) $('#uContext').innerHTML = `≈ <b>${fmt(Math.round(ev.chars / 3))}</b> tokens · ${ev.messages} 条消息${ev.compacted ? ` · 已压缩 ${ev.compacted} 条旧记录` : ''}`; break;
     case 'reasoning': addReasoning(pid, ev.content); break;
     case 'text': addMsg(pid, 'assistant', ev.content); break;
     case 'tool_call': addTool(pid, ev.name, ev.args); break;
     case 'tool_result': addToolResult(pid, ev.name, ev.preview); break;
     case 'restarting': addSys(pid, '↻ 文件已修改，重启项目…'); break;
-    case 'restarted': addSys(pid, ev.status === 'running' ? '✓ 项目已重启' : '✗ 重启后状态: ' + ev.status); if (ev.status === 'running' && current?.id === pid) setTimeout(reloadFrame, 400); break;
-    case 'done': addMsg(pid, 'assistant', ev.content); if (current?.id === pid) reloadFrame(); break;
+    case 'restarted': addSys(pid, ev.status === 'running' ? '✓ 项目已重启' : '✗ 重启后状态: ' + ev.status); if (ev.status === 'running' && sameProject(pid)) setTimeout(reloadFrame, 400); break;
+    case 'done': addMsg(pid, 'assistant', ev.content); if (sameProject(pid)) reloadFrame(); break;
     case 'error': addMsg(pid, 'error', ev.message); break;
   }
 }
@@ -271,11 +327,11 @@ $('#btnToggle').onclick = async () => {
   finally { await loadProjects(); if (!live) reloadFrame(); }
 };
 $('#btnReload').onclick = reloadFrame;
-$('#btnClear').onclick = async () => { if (confirm('清空该项目的对话历史？（不影响代码，项目累计 token 保留）')) { await api(`/api/projects/${current.id}/history`, { method: 'DELETE' }); await Promise.all([loadHistory(), loadUsage()]); } };
+$('#btnClear').onclick = async () => { if (confirm('清空当前会话的对话记录？（不影响代码，项目累计 token 保留）')) { await api(`/api/projects/${current.id}/history?session=${encodeURIComponent(currentSession || '')}`, { method: 'DELETE' }); await Promise.all([loadSessions(true), loadHistory(), loadUsage()]); } };
 $('#btnDelete').onclick = async () => {
   if (!confirm(`删除项目「${current.name}」及其全部文件？不可恢复。`)) return;
   await api(`/api/projects/${current.id}`, { method: 'DELETE' });
-  current = null; $('#frame').src = 'about:blank'; $('#messages').innerHTML = ''; $('#usage').hidden = true;
+  current = null; currentSession = null; $('#frame').src = 'about:blank'; $('#messages').innerHTML = ''; $('#usage').hidden = true; $('#sessionBar').hidden = true;
   await loadProjects();
 };
 $('#btnLogs').onclick = async () => {

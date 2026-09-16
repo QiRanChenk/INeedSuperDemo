@@ -6,7 +6,8 @@ import { PROJECT_TYPES, listProjects, createProject, deleteProject, readProject,
 import * as runner from './runner.js';
 import { proxyMiddleware } from './proxy.js';
 import { testConnection } from './llm.js';
-import { runAgent, loadHistory, clearHistory, isBusy, usageSummary } from './agent.js';
+import { runAgent, isBusy, usageSummary } from './agent.js';
+import { listSessions, createSession, renameSession, deleteSession, setCurrentSession, loadHistory, clearHistory } from './sessions.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -89,9 +90,17 @@ app.get('/api/projects/:id/file', wrap((req, res) => {
 }));
 
 // ---- chat ----
-app.get('/api/projects/:id/history', wrap((req, res) => res.json(loadHistory(req.params.id))));
-app.get('/api/projects/:id/usage', wrap((req, res) => res.json(usageSummary(req.params.id))));
-app.delete('/api/projects/:id/history', wrap((req, res) => { clearHistory(req.params.id); res.json({ ok: true }); }));
+const sid = req => (req.query.session || req.body?.session || undefined);
+app.get('/api/projects/:id/history', wrap((req, res) => res.json(loadHistory(req.params.id, sid(req)))));
+app.get('/api/projects/:id/usage', wrap((req, res) => res.json(usageSummary(req.params.id, sid(req)))));
+app.delete('/api/projects/:id/history', wrap((req, res) => { clearHistory(req.params.id, sid(req)); res.json({ ok: true }); }));
+
+// ---- sessions ----
+app.get('/api/projects/:id/sessions', wrap((req, res) => res.json(listSessions(req.params.id))));
+app.post('/api/projects/:id/sessions', wrap((req, res) => res.json(createSession(req.params.id, req.body?.title))));
+app.patch('/api/projects/:id/sessions/:sid', wrap((req, res) => res.json(renameSession(req.params.id, req.params.sid, req.body?.title))));
+app.delete('/api/projects/:id/sessions/:sid', wrap((req, res) => res.json({ current: deleteSession(req.params.id, req.params.sid) })));
+app.post('/api/projects/:id/sessions/:sid/activate', wrap((req, res) => res.json({ current: setCurrentSession(req.params.id, req.params.sid) })));
 
 app.post('/api/projects/:id/chat', wrap(async (req, res) => {
   const id = req.params.id;
@@ -106,7 +115,7 @@ app.post('/api/projects/:id/chat', wrap(async (req, res) => {
   const send = ev => res.write(`data: ${JSON.stringify(ev)}\n\n`);
   const ping = setInterval(() => res.write(': ping\n\n'), 15000);
   try {
-    await runAgent(id, message, send);
+    await runAgent(id, message, send, sid(req));
   } catch (e) {
     send({ type: 'error', message: e.message });
   } finally {
