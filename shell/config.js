@@ -36,20 +36,40 @@ function readSettingsFile() {
 /** Effective LLM settings: UI settings file overrides env. */
 export function getSettings() {
   const s = readSettingsFile();
+  const pl = s.projectLlm || {};
   return {
     baseUrl: (s.baseUrl || process.env.LLM_BASE_URL || '').replace(/\/+$/, ''),
     apiKey: s.apiKey || process.env.LLM_API_KEY || '',
     model: s.model || process.env.LLM_MODEL || '',
     temperature: Number.isFinite(s.temperature) ? s.temperature : 0.3,
     maxIterations: Number.isInteger(s.maxIterations) && s.maxIterations >= 1 ? s.maxIterations : 25,
+    // LLM used INSIDE generated projects (env SUPERDEMO_LLM_*). useShell=true -> same as the shell agent.
+    projectLlm: {
+      useShell: pl.useShell !== false,
+      baseUrl: (pl.baseUrl || '').replace(/\/+$/, ''),
+      apiKey: pl.apiKey || '',
+      model: pl.model || '',
+    },
   };
+}
+
+/** Resolved LLM config injected into project processes. */
+export function getProjectLlm(settings = getSettings()) {
+  const { projectLlm: pl } = settings;
+  if (pl.useShell) return { baseUrl: settings.baseUrl, apiKey: settings.apiKey, model: settings.model, source: 'shell' };
+  return { baseUrl: pl.baseUrl, apiKey: pl.apiKey, model: pl.model, source: 'custom' };
 }
 
 export function saveSettings(patch) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const cur = readSettingsFile();
-  const next = { ...cur, ...patch };
+  const { projectLlm, ...flat } = patch;
+  const next = { ...cur, ...flat };
   if (patch.apiKey === '') delete next.apiKey; // allow clearing back to env
+  if (projectLlm) {
+    next.projectLlm = { ...(cur.projectLlm || {}), ...projectLlm };
+    if (projectLlm.apiKey === '') delete next.projectLlm.apiKey;
+  }
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(next, null, 2));
   return getSettings();
 }

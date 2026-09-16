@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import net from 'node:net';
 import path from 'node:path';
-import { getSettings } from './config.js';
+import { getProjectLlm } from './config.js';
 import { projectDir, readProject, syncSdk } from './registry.js';
 
 const procs = new Map(); // id -> { proc, status, logs, startedAt }
@@ -29,15 +29,15 @@ export function status(id) {
 export function logs(id) { return entry(id).logs; }
 
 export function projectEnv(project) {
-  const s = getSettings();
+  const llm = getProjectLlm();
   return {
     ...process.env,
     PORT: String(project.port),
     SUPERDEMO_PROJECT_ID: project.id,
     SUPERDEMO_PROJECT_NAME: project.name,
-    SUPERDEMO_LLM_BASE_URL: s.baseUrl,
-    SUPERDEMO_LLM_API_KEY: s.apiKey,
-    SUPERDEMO_LLM_MODEL: s.model,
+    SUPERDEMO_LLM_BASE_URL: llm.baseUrl,
+    SUPERDEMO_LLM_API_KEY: llm.apiKey,
+    SUPERDEMO_LLM_MODEL: llm.model,
   };
 }
 
@@ -86,6 +86,10 @@ export function stop(id) {
 export async function restart(id) {
   await stop(id);
   return start(id);
+}
+
+export function runningIds() {
+  return [...procs.entries()].filter(([, e]) => e.proc).map(([id]) => id);
 }
 
 export async function stopAll() {

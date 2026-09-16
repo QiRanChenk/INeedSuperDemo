@@ -81,6 +81,18 @@
       <label class="inline">最大迭代<input id="stIter" type="number" min="1" max="100"></label></div>
     <div id="stResult" class="small muted"></div>
     <div class="row end"><button type="button" id="stTest" class="ghost">保存并测试连接</button><button type="submit" class="primary">保存</button></div>
+
+    <hr class="sep-line">
+    <h4>项目内 AI（Demo 运行时调用的模型）</h4>
+    <label class="check"><input type="checkbox" id="stUseShell" checked> Demo 里使用 SuperDemo 的配置（与上方一致）</label>
+    <div id="stProjectFields" class="subfields" hidden>
+      <label>预设<select id="stpPreset"></select></label>
+      <label>Base URL<input id="stpBase" placeholder="https://api.deepseek.com"></label>
+      <label>Model<input id="stpModel" placeholder="deepseek-chat"></label>
+      <label>API Key<input id="stpKey" type="password" placeholder="sk-…（留空保持不变）" autocomplete="off"></label>
+    </div>
+    <div id="stpResult" class="small muted"></div>
+    <div class="row end"><button type="button" id="stpTest" class="ghost">保存并测试项目侧连接</button></div>
   </form>
 </div>
 

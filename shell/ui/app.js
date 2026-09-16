@@ -194,7 +194,32 @@ async function loadSettings() {
   $('#stBase').value = settings.baseUrl; $('#stModel').value = settings.model; $('#stKey').value = '';
   $('#stKey').placeholder = settings.hasKey ? `已配置 ${settings.apiKey}（留空保持不变）` : 'sk-…';
   $('#stTemp').value = settings.temperature; $('#stIter').value = settings.maxIterations;
+  // project-side LLM
+  const pl = settings.projectLlm;
+  $('#stUseShell').checked = pl.useShell;
+  $('#stProjectFields').hidden = pl.useShell;
+  const psel = $('#stpPreset'); psel.innerHTML = '';
+  for (const p of settings.presets) { const o = document.createElement('option'); o.value = p.id; o.textContent = p.label; psel.appendChild(o); }
+  const pmatch = settings.presets.find(p => p.baseUrl && p.baseUrl === pl.baseUrl);
+  psel.value = pmatch ? pmatch.id : 'custom';
+  $('#stpBase').value = pl.baseUrl; $('#stpModel').value = pl.model; $('#stpKey').value = '';
+  $('#stpKey').placeholder = pl.hasKey ? `已配置 ${pl.apiKey}（留空保持不变）` : 'sk-…';
+  const eff = settings.effectiveProjectLlm;
+  $('#openSettings').title += `\n项目内 AI: ${eff.source === 'shell' ? '同壳配置' : '独立配置'} · ${eff.model || '未配置'}`;
 }
+function collectProjectLlm() {
+  const pl = { useShell: $('#stUseShell').checked, baseUrl: $('#stpBase').value, model: $('#stpModel').value };
+  if ($('#stpKey').value) pl.apiKey = $('#stpKey').value;
+  return pl;
+}
+$('#stUseShell').onchange = () => { $('#stProjectFields').hidden = $('#stUseShell').checked; };
+$('#stpPreset').onchange = () => { const p = settings.presets.find(x => x.id === $('#stpPreset').value); if (p && p.baseUrl) { $('#stpBase').value = p.baseUrl; $('#stpModel').value = p.model; } };
+$('#stpTest').onclick = async () => {
+  $('#stpResult').textContent = '测试中…';
+  try { const saved = await saveSettings(); const r = await api('/api/settings/test-project', { method: 'POST' });
+    $('#stpResult').textContent = `✓ 项目侧连接成功 ${r.ms}ms · ${r.source === 'shell' ? '同壳配置' : '独立配置'} · ${r.model}` + (saved.restarted?.length ? ` · 已重启 ${saved.restarted.length} 个项目` : ''); }
+  catch (e) { $('#stpResult').textContent = '✗ ' + e.message; }
+};
 function toggleSettings(open) {
   const panel = $('#settingsPanel');
   const show = open ?? panel.hidden;
@@ -204,13 +229,15 @@ function toggleSettings(open) {
   if (show) $('#stResult').textContent = '';
 }
 async function saveSettings() {
-  const body = { baseUrl: $('#stBase').value, model: $('#stModel').value, temperature: $('#stTemp').value, maxIterations: $('#stIter').value };
+  const body = { baseUrl: $('#stBase').value, model: $('#stModel').value, temperature: $('#stTemp').value, maxIterations: $('#stIter').value, projectLlm: collectProjectLlm() };
   if ($('#stKey').value) body.apiKey = $('#stKey').value;
-  await api('/api/settings', { method: 'PUT', body });
+  const saved = await api('/api/settings', { method: 'PUT', body });
   await loadSettings();
+  if (saved.restarted?.length) { loadProjects(); if (current && saved.restarted.includes(current.id)) setTimeout(reloadFrame, 600); }
+  return saved;
 }
 $('#stPreset').onchange = () => { const p = settings.presets.find(x => x.id === $('#stPreset').value); if (p && p.baseUrl) { $('#stBase').value = p.baseUrl; $('#stModel').value = p.model; } };
-$('#settingsPanel form').onsubmit = async e => { e.preventDefault(); try { await saveSettings(); $('#stResult').textContent = '✓ 已保存'; } catch (err) { $('#stResult').textContent = '✗ ' + err.message; } };
+$('#settingsPanel form').onsubmit = async e => { e.preventDefault(); try { const saved = await saveSettings(); $('#stResult').textContent = '✓ 已保存' + (saved.restarted?.length ? `，已重启 ${saved.restarted.length} 个项目使新配置生效` : ''); } catch (err) { $('#stResult').textContent = '✗ ' + err.message; } };
 $('#stTest').onclick = async () => {
   $('#stResult').textContent = '测试中…';
   try { await saveSettings(); const r = await api('/api/settings/test', { method: 'POST' }); $('#stResult').textContent = `✓ 连接成功 ${r.ms}ms，回复: ${r.reply}`; }

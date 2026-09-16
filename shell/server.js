@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'node:path';
 import fs from 'node:fs';
-import { ROOT, getSettings, saveSettings, maskKey, PRESETS } from './config.js';
+import { ROOT, getSettings, saveSettings, getProjectLlm, maskKey, PRESETS } from './config.js';
 import { PROJECT_TYPES, listProjects, createProject, deleteProject, readProject, writeProject, fileTree, safePath } from './registry.js';
 import * as runner from './runner.js';
 import { proxyMiddleware } from './proxy.js';
@@ -18,13 +18,24 @@ app.use(express.static(path.join(ROOT, 'shell', 'ui')));
 const wrap = fn => (req, res) => Promise.resolve(fn(req, res)).catch(e => res.status(400).json({ error: e.message }));
 
 // ---- settings ----
-app.get('/api/settings', (req, res) => {
-  const s = getSettings();
-  res.json({ ...s, apiKey: maskKey(s.apiKey), hasKey: !!s.apiKey, presets: PRESETS });
+const publicSettings = s => ({
+  ...s,
+  apiKey: maskKey(s.apiKey), hasKey: !!s.apiKey,
+  projectLlm: { ...s.projectLlm, apiKey: maskKey(s.projectLlm.apiKey), hasKey: !!s.projectLlm.apiKey },
+  effectiveProjectLlm: (() => { const e = getProjectLlm(s); return { ...e, apiKey: maskKey(e.apiKey), hasKey: !!e.apiKey }; })(),
 });
-app.put('/api/settings', wrap((req, res) => {
-  const { baseUrl, apiKey, model, temperature, maxIterations } = req.body || {};
+app.get('/api/settings', (req, res) => res.json({ ...publicSettings(getSettings()), presets: PRESETS }));
+app.put('/api/settings', wrap(async (req, res) => {
+  const { baseUrl, apiKey, model, temperature, maxIterations, projectLlm } = req.body || {};
+  const before = JSON.stringify(getProjectLlm());
   const patch = {};
+  if (projectLlm && typeof projectLlm === 'object') {
+    patch.projectLlm = {};
+    if (projectLlm.useShell !== undefined) patch.projectLlm.useShell = !!projectLlm.useShell;
+    if (projectLlm.baseUrl !== undefined) patch.projectLlm.baseUrl = String(projectLlm.baseUrl).trim();
+    if (projectLlm.model !== undefined) patch.projectLlm.model = String(projectLlm.model).trim();
+    if (projectLlm.apiKey !== undefined && !String(projectLlm.apiKey).includes('****')) patch.projectLlm.apiKey = String(projectLlm.apiKey).trim();
+  }
   if (baseUrl !== undefined) patch.baseUrl = String(baseUrl).trim();
   if (model !== undefined) patch.model = String(model).trim();
   if (apiKey !== undefined && !String(apiKey).includes('****')) patch.apiKey = String(apiKey).trim();
@@ -32,9 +43,19 @@ app.put('/api/settings', wrap((req, res) => {
   if (temperature !== undefined && temperature !== '' && Number.isFinite(t) && t >= 0 && t <= 2) patch.temperature = t;
   if (maxIterations !== undefined && Number.isInteger(it) && it >= 1 && it <= 200) patch.maxIterations = it;
   const s = saveSettings(patch);
-  res.json({ ...s, apiKey: maskKey(s.apiKey), hasKey: !!s.apiKey });
+  // project-side LLM changed -> restart running projects so the new env takes effect
+  let restarted = [];
+  if (JSON.stringify(getProjectLlm(s)) !== before) {
+    restarted = runner.runningIds();
+    await Promise.all(restarted.map(id => runner.restart(id).catch(() => {})));
+  }
+  res.json({ ...publicSettings(s), restarted });
 }));
 app.post('/api/settings/test', wrap(async (req, res) => res.json(await testConnection())));
+app.post('/api/settings/test-project', wrap(async (req, res) => {
+  const e = getProjectLlm();
+  res.json({ ...(await testConnection({ ...getSettings(), ...e })), source: e.source, model: e.model });
+}));
 
 // ---- projects ----
 const withStatus = p => ({ ...p, ...runner.status(p.id), busy: isBusy(p.id), typeLabel: PROJECT_TYPES[p.type]?.label, hasUi: !!PROJECT_TYPES[p.type]?.hasUi });
