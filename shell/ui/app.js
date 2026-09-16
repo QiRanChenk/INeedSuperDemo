@@ -305,16 +305,26 @@ $('#newProject').onclick = async () => {
   const types = await api('/api/project-types');
   const sel = $('#npType'); sel.innerHTML = '';
   for (const t of types) { const o = document.createElement('option'); o.value = t.id; o.textContent = t.label; o.disabled = !t.available; sel.appendChild(o); }
-  $('#npName').value = ''; $('#npDesc').value = '';
-  $('#dlgNew').showModal();
+  $('#npName').value = ''; $('#npDesc').value = ''; $('#npStatus').textContent = '';
+  $('#dlgNew').showModal(); $('#npDesc').focus();
+};
+$('#npGen').onclick = async () => {
+  const description = $('#npDesc').value.trim();
+  if (!description) { $('#npStatus').textContent = '请先填写「你想做什么」'; $('#npDesc').focus(); return; }
+  $('#npGen').disabled = true; $('#npStatus').textContent = 'AI 正在起名…';
+  try { const r = await api('/api/projects/name', { method: 'POST', body: { description } }); $('#npName').value = r.name; $('#npStatus').textContent = ''; }
+  catch (err) { $('#npStatus').textContent = '✗ ' + err.message; }
+  finally { $('#npGen').disabled = false; }
 };
 $('#dlgNew form').onsubmit = async e => {
   if (e.submitter?.value !== 'ok') return;
   const name = $('#npName').value.trim(), description = $('#npDesc').value.trim(), type = $('#npType').value;
+  if (!description) { e.preventDefault(); $('#npStatus').textContent = '请填写「你想做什么」'; $('#npDesc').focus(); return; }
+  if (!name) $('#npStatus').textContent = 'AI 正在起名并创建项目…';
   try {
     const p = await api('/api/projects', { method: 'POST', body: { name, description, type } });
     await loadProjects(); await select(p.id);
-    if (description) send(`请根据以下需求改造这个项目：\n${description}`);
+    send(`请根据以下需求改造这个项目：\n${description}`);
   } catch (err) { alert(err.message); }
 };
 

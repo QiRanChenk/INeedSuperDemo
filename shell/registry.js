@@ -37,7 +37,7 @@ export function listProjects() {
 
 function slugify(name) {
   const s = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24);
-  return s.length >= 2 ? s : 'proj';
+  return s.length >= 2 ? s : 'p' + Date.now().toString(36).slice(-5);
 }
 
 function nextPort() {
@@ -48,7 +48,8 @@ function nextPort() {
 }
 
 export function createProject({ name, description = '', type = 'web' }) {
-  if (!name || !name.trim()) throw new Error('name required');
+  if (!description || !description.trim()) throw new Error('请填写「你想做什么」');
+  if (!name || !name.trim()) throw new Error('name required (generate it first)');
   const def = PROJECT_TYPES[type];
   if (!def) throw new Error('unknown project type: ' + type);
   if (!def.template) throw new Error(`${def.label} 尚未实现`);

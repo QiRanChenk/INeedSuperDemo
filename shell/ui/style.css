@@ -80,3 +80,5 @@ body.no-preview { grid-template-columns: 240px 1fr; } body.no-preview #preview {
 .sessionbar { display: flex; align-items: center; gap: 6px; padding: 6px 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .sessionbar select { flex: 1; min-width: 0; font: inherit; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
 .sessionbar button { padding: 4px 8px; white-space: nowrap; }
+.req { color: var(--danger); margin: 0 4px; }
+.dlg label .row { margin-bottom: 0; } .dlg label .row input { flex: 1; }

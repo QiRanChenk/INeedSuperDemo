@@ -44,7 +44,7 @@ npm start          # http://localhost:3000
 
 也可以复制 `.env.example` 为 `.env` 配置。模型需支持 tool calling。
 
-然后点「新建项目」，在描述里写一句需求，例如：
+然后点「新建项目」，写一句需求（项目名可留空，AI 会生成一个不超过 10 字的名称），例如：
 
 > 做一个门店库存预警工具：录入商品和库存，低于阈值标红，并让 AI 给补货建议
 
@@ -69,7 +69,7 @@ AI 会在几十秒内把内置模板改成你要的东西。之后继续对话�
 - **Token 统计**：本会话 / 项目累计的输入、输出、缓存命中率、合计
 - **项目内 AI 可独立配置**：默认 Demo 复用壳的模型；取消勾选后可为 Demo 单独指定端点 / 模型 / Key（如 agent 用编码模型、Demo 用便宜的对话模型），保存即自动重启项目生效
 - **真实存储**：项目 SDK 提供 `openDb()`（SQLite），Agent 被要求所有持久化数据必须入库
-- **独立部署**：项目目录即部署单元，`npm start` 或 `docker build`
+- **独立部署**：项目目录即部署单元，`npm start`，或 `docker compose up -d --build`（自带 Dockerfile 与 docker-compose.yml，数据卷持久化）
 - **项目类型**：B/S Web 应用、无界面服务；C/S 桌面应用（规划中）
 
 ## 目录结构
@@ -102,6 +102,7 @@ SDK API 详见 [`sdk/README.md`](sdk/README.md)。
 - [x] 多会话管理、上下文自动瘦身
 - [ ] C/S 桌面项目模板（Electron / Tauri）
 - [ ] 项目间协作（服务发现 + 壳内 HTTP 网关）
+- [x] docker-compose 一键部署
 - [ ] 一键导出 zip / 构建 Docker 镜像
 - [ ] Postgres / MySQL 数据源
 - [ ] 多用户与权限

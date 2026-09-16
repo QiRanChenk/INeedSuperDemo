@@ -6,7 +6,7 @@ import { PROJECT_TYPES, listProjects, createProject, deleteProject, readProject,
 import * as runner from './runner.js';
 import { proxyMiddleware } from './proxy.js';
 import { testConnection } from './llm.js';
-import { runAgent, isBusy, usageSummary } from './agent.js';
+import { runAgent, isBusy, usageSummary, generateProjectName } from './agent.js';
 import { listSessions, createSession, renameSession, deleteSession, setCurrentSession, loadHistory, clearHistory } from './sessions.js';
 
 const app = express();
@@ -63,8 +63,17 @@ const withStatus = p => ({ ...p, ...runner.status(p.id), busy: isBusy(p.id), typ
 
 app.get('/api/project-types', (req, res) => res.json(Object.entries(PROJECT_TYPES).map(([id, t]) => ({ id, label: t.label, available: !!t.template }))));
 app.get('/api/projects', (req, res) => res.json(listProjects().map(withStatus)));
+app.post('/api/projects/name', wrap(async (req, res) => {
+  const description = String(req.body?.description || '').trim();
+  if (!description) return res.status(400).json({ error: '请先填写「你想做什么」' });
+  res.json({ name: await generateProjectName(description) });
+}));
 app.post('/api/projects', wrap(async (req, res) => {
-  const p = createProject(req.body || {});
+  const body = { ...(req.body || {}) };
+  body.description = String(body.description || '').trim();
+  if (!body.description) return res.status(400).json({ error: '请填写「你想做什么」' });
+  body.name = String(body.name || '').trim() || await generateProjectName(body.description);
+  const p = createProject(body);
   await runner.start(p.id);
   res.json(withStatus(p));
 }));

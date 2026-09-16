@@ -10,8 +10,13 @@ export $(cat .env | xargs) && npm start   # Node >= 22.13（内置 SQLite）
 
 ## Docker
 ```bash
+cp .env.example .env            # 填入模型配置
+docker compose up -d --build    # 默认映射 3000 端口，数据持久化在 ./data
+```
+或手动：
+```bash
 docker build -t my-demo .
-docker run -p 3000:3000 -e SUPERDEMO_LLM_BASE_URL=... -e SUPERDEMO_LLM_API_KEY=... -e SUPERDEMO_LLM_MODEL=... my-demo
+docker run -p 3000:3000 -v $PWD/data:/app/data --env-file .env my-demo
 ```
 
 ## 结构

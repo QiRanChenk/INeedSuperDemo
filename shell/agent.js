@@ -263,3 +263,28 @@ function summarizeArgs(args) {
   for (const [k, v] of Object.entries(args)) out[k] = typeof v === 'string' && v.length > 120 ? v.slice(0, 120) + `…(${v.length} chars)` : v;
   return out;
 }
+
+/** Generate a project name (<= 10 chars) from the description; falls back to the description head. */
+const MAX_NAME = 10;
+const cleanName = raw => String(raw || '').split('\n').map(l => l.trim()).filter(Boolean)[0]?.replace(/^[「『"'“‘《\[（(]+|[」』"'”’》\]）)。.!！]+$/g, '').trim() || '';
+/** Cut at the first punctuation / space; hard-cut at MAX_NAME only as a last resort. */
+function smartCut(name) {
+  const seg = String(name).split(/[\s，,、。;；:：（）()|/\-—]+/).filter(Boolean)[0] || '';
+  const chars = [...seg];
+  return chars.length <= MAX_NAME ? seg : chars.slice(0, MAX_NAME).join('');
+}
+function fallbackName(description) {
+  const d = String(description).replace(/\s+/g, ' ').trim().replace(/^(请|帮我|我想|我要|我们|需要|希望|想|要)*(做|开发|实现|设计|搭建|写|建|弄)?(一个|个|一套|套|一款|款)?/, '');
+  return smartCut(d) || '新项目';
+}
+export async function generateProjectName(description) {
+  const system = `你给软件项目起名。根据需求描述输出一个简短、具体、面向业务的中文项目名：严格不超过 ${MAX_NAME} 个汉字，不含标点、引号、空格，不带"项目/系统/平台/Demo/小助手/管理"等冗余后缀。只输出名字本身。`;
+  try {
+    const ask = async msgs => cleanName((await chat({ temperature: 0.2, messages: msgs })).message.content);
+    let name = await ask([{ role: 'system', content: system }, { role: 'user', content: String(description).slice(0, 2000) }]);
+    if ([...name].length > MAX_NAME) {
+      name = await ask([{ role: 'system', content: system }, { role: 'user', content: `把「${name}」压缩到不超过 ${MAX_NAME} 个字，保留核心业务含义，只输出名字。` }]);
+    }
+    return smartCut(name) || fallbackName(description);
+  } catch { return fallbackName(description); }
+}
