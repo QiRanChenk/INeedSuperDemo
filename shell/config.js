@@ -43,6 +43,7 @@ export function getSettings() {
     model: s.model || process.env.LLM_MODEL || '',
     temperature: Number.isFinite(s.temperature) ? s.temperature : 0.3,
     maxIterations: Number.isInteger(s.maxIterations) && s.maxIterations >= 1 ? s.maxIterations : 25,
+    contextWindow: Number.isInteger(s.contextWindow) && s.contextWindow >= 1000 ? s.contextWindow : 1_000_000, // tokens
     // LLM used INSIDE generated projects (env SUPERDEMO_LLM_*). useShell=true -> same as the shell agent.
     projectLlm: {
       useShell: pl.useShell !== false,

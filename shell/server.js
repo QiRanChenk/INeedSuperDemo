@@ -6,7 +6,7 @@ import { PROJECT_TYPES, listProjects, createProject, deleteProject, readProject,
 import * as runner from './runner.js';
 import { proxyMiddleware } from './proxy.js';
 import { testConnection } from './llm.js';
-import { runAgent, isBusy, usageSummary, generateProjectName } from './agent.js';
+import { runAgent, isBusy, usageSummary, generateProjectName, getContextInfo } from './agent.js';
 import { summary as usageLogSummary, readLog, backfillIfNeeded } from './usagelog.js';
 import { listSessions, createSession, renameSession, deleteSession, setCurrentSession, loadHistory, clearHistory } from './sessions.js';
 
@@ -28,7 +28,7 @@ const publicSettings = s => ({
 });
 app.get('/api/settings', (req, res) => res.json({ ...publicSettings(getSettings()), presets: PRESETS }));
 app.put('/api/settings', wrap(async (req, res) => {
-  const { baseUrl, apiKey, model, temperature, maxIterations, projectLlm } = req.body || {};
+  const { baseUrl, apiKey, model, temperature, maxIterations, contextWindow, projectLlm } = req.body || {};
   const before = JSON.stringify(getProjectLlm());
   const patch = {};
   if (projectLlm && typeof projectLlm === 'object') {
@@ -44,6 +44,8 @@ app.put('/api/settings', wrap(async (req, res) => {
   const t = Number(temperature), it = parseInt(maxIterations, 10);
   if (temperature !== undefined && temperature !== '' && Number.isFinite(t) && t >= 0 && t <= 2) patch.temperature = t;
   if (maxIterations !== undefined && Number.isInteger(it) && it >= 1 && it <= 200) patch.maxIterations = it;
+  const cw = parseInt(contextWindow, 10);
+  if (contextWindow !== undefined && Number.isInteger(cw) && cw >= 1000 && cw <= 100_000_000) patch.contextWindow = cw;
   const s = saveSettings(patch);
   // project-side LLM changed -> restart running projects so the new env takes effect
   let restarted = [];
@@ -103,6 +105,7 @@ app.get('/api/projects/:id/file', wrap((req, res) => {
 const sid = req => (req.query.session || req.body?.session || undefined);
 app.get('/api/projects/:id/history', wrap((req, res) => res.json(loadHistory(req.params.id, sid(req)))));
 app.get('/api/projects/:id/usage', wrap((req, res) => res.json(usageSummary(req.params.id, sid(req)))));
+app.get('/api/projects/:id/context', wrap((req, res) => res.json(getContextInfo(req.params.id, sid(req)))));
 app.delete('/api/projects/:id/history', wrap((req, res) => { clearHistory(req.params.id, sid(req)); res.json({ ok: true }); }));
 
 // ---- shell-wide token usage log ----

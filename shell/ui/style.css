@@ -109,3 +109,6 @@ body.no-preview { grid-template-columns: 240px 1fr; } body.no-preview #preview {
 .ustable { width: 100%; border-collapse: collapse; font-size: 13px; } .ustable th, .ustable td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: right; }
 .ustable th:first-child, .ustable td:first-child { text-align: left; } .ustable th { color: var(--muted); font-weight: 500; }
 .legend label, .inline-date { flex-direction: row !important; align-items: center; }
+#uContext.warn b { color: var(--warn); } #uContext.danger b { color: var(--danger); }
+.ctxbar { display: inline-block; width: 80px; height: 6px; border-radius: 3px; background: #262b38; vertical-align: middle; margin: 0 6px; overflow: hidden; }
+.ctxbar i { display: block; height: 100%; background: var(--brand); } #uContext.warn .ctxbar i { background: var(--warn); } #uContext.danger .ctxbar i { background: var(--danger); }

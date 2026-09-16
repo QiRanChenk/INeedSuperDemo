@@ -61,6 +61,25 @@ export function usageSummary(id, sid) { return { session: sessionUsage(id, sid),
 const KEEP_FULL_TURNS = 2;
 const SOFT_LIMIT_CHARS = 240_000; // ~80k tokens; beyond this even the previous turn is compacted
 
+/** Rough token estimate: CJK ~0.75 token/char, everything else ~3.5 chars/token. */
+export function estimateTokens(text) {
+  const str = String(text ?? '');
+  let cjk = 0;
+  for (const ch of str) { const c = ch.codePointAt(0); if ((c >= 0x3000 && c <= 0x9fff) || (c >= 0xf900 && c <= 0xfaff) || (c >= 0xff00 && c <= 0xffef)) cjk++; }
+  return Math.round(cjk * 0.75 + (str.length - cjk) / 3.5);
+}
+
+/** What the next request would contain for this session: message count, compaction count, chars, estimated tokens. */
+export function getContextInfo(id, sid) {
+  const project = readProject(id);
+  if (!project) throw new Error('project not found');
+  const history = loadHistory(id, sid);
+  const c = compactHistory(history);
+  const sys = systemPrompt(project);
+  const all = sys + JSON.stringify(c.messages);
+  return { session: resolveSession(id, sid), messages: c.messages.length + 1, compacted: c.compacted, chars: all.length, tokens: estimateTokens(all), window: getSettings().contextWindow };
+}
+
 export function compactHistory(history) {
   let turn = 0;
   const turnOf = history.map(m => (m.role === 'user' && !m.system) ? ++turn : turn);
@@ -204,7 +223,8 @@ async function runAgentInner(project, userMessage, onEvent, sid) {
   const rebuild = () => {
     const c = compactHistory(history);
     messages = [system, ...c.messages];
-    onEvent({ type: 'context', session: sid, messages: messages.length, compacted: c.compacted, chars: c.chars + system.content.length });
+    const all = system.content + JSON.stringify(c.messages);
+    onEvent({ type: 'context', session: sid, messages: messages.length, compacted: c.compacted, chars: all.length, tokens: estimateTokens(all), window: settings.contextWindow });
   };
   rebuild();
 

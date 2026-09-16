@@ -110,6 +110,19 @@ function renderUsage(pid, data) {
   $('#uSession').innerHTML = usageLine(data.session);
   $('#uProject').innerHTML = usageLine(data.project);
 }
+function renderContext(pid, c) {
+  if (viewKey() !== pid) return;
+  const el = $('#uContext');
+  const win = c.window || settings?.contextWindow || 1e6;
+  const pct = Math.min(100, c.tokens / win * 100);
+  el.className = pct >= 90 ? 'danger' : pct >= 70 ? 'warn' : '';
+  el.innerHTML = `≈ <b>${fmt(c.tokens)}</b> tokens <span class="ctxbar"><i style="width:${pct.toFixed(1)}%"></i></span><b>${pct < 1 ? pct.toFixed(2) : pct.toFixed(1)}%</b> / ${fmt(win)} · ${c.messages} 条消息${c.compacted ? ` · 已压缩 ${c.compacted} 条旧记录` : ''}`;
+}
+async function loadContext() {
+  if (!current) return;
+  const pid = viewKey();
+  try { renderContext(pid, await api(`/api/projects/${current.id}/context?session=${encodeURIComponent(currentSession || '')}`)); } catch {}
+}
 async function loadUsage() {
   if (!current) { $('#usage').hidden = true; return; }
   const pid = viewKey();
@@ -152,7 +165,7 @@ async function loadHistory() {
   }
   if (!hist.length) addSys(pid, '新会话。项目代码与其他会话共享，对话记忆从这里重新开始。');
   if (isBusy(current)) showThinking(pid, '处理中…');
-  $('#uContext').textContent = '—';
+  loadContext();
   box.scrollTop = box.scrollHeight;
 }
 
@@ -222,7 +235,7 @@ function handleEvent(pid, ev) {
   switch (ev.type) {
     case 'thinking': showThinking(pid, `思考中… (第 ${ev.iteration} 轮)`); break;
     case 'usage': renderUsage(pid, ev); UsageDialog.refreshSummary(); break;
-    case 'context': if (viewKey() === pid) $('#uContext').innerHTML = `≈ <b>${fmt(Math.round(ev.chars / 3))}</b> tokens · ${ev.messages} 条消息${ev.compacted ? ` · 已压缩 ${ev.compacted} 条旧记录` : ''}`; break;
+    case 'context': renderContext(pid, ev); break;
     case 'reasoning': addReasoning(pid, ev.content); break;
     case 'text': addMsg(pid, 'assistant', ev.content); break;
     case 'tool_call': addTool(pid, ev.name, ev.args); break;
@@ -249,7 +262,7 @@ async function loadSettings() {
   sel.value = match ? match.id : 'custom';
   $('#stBase').value = settings.baseUrl; $('#stModel').value = settings.model; $('#stKey').value = '';
   $('#stKey').placeholder = settings.hasKey ? `已配置 ${settings.apiKey}（留空保持不变）` : 'sk-…';
-  $('#stTemp').value = settings.temperature; $('#stIter').value = settings.maxIterations;
+  $('#stTemp').value = settings.temperature; $('#stIter').value = settings.maxIterations; $('#stCtx').value = settings.contextWindow;
   // project-side LLM
   const pl = settings.projectLlm;
   $('#stUseShell').checked = pl.useShell;
@@ -283,10 +296,11 @@ function toggleSettings(open) {
   else if (dlg.open) dlg.close();
 }
 async function saveSettings() {
-  const body = { baseUrl: $('#stBase').value, model: $('#stModel').value, temperature: $('#stTemp').value, maxIterations: $('#stIter').value, projectLlm: collectProjectLlm() };
+  const body = { baseUrl: $('#stBase').value, model: $('#stModel').value, temperature: $('#stTemp').value, maxIterations: $('#stIter').value, contextWindow: $('#stCtx').value, projectLlm: collectProjectLlm() };
   if ($('#stKey').value) body.apiKey = $('#stKey').value;
   const saved = await api('/api/settings', { method: 'PUT', body });
   await loadSettings();
+  loadContext();
   if (saved.restarted?.length) { loadProjects(); if (current && saved.restarted.includes(current.id)) setTimeout(reloadFrame, 600); }
   return saved;
 }
