@@ -8,11 +8,11 @@ db.ensureTable('analyses', 'id INTEGER PRIMARY KEY AUTOINCREMENT, ref TEXT, ques
 
 // ---- data sources: file (data/) + database tables + example public API ----
 const files = datasources.register(new FileDataSource('data'));
-datasources.register(new SqliteDataSource(db));
+datasources.register(new SqliteDataSource(db, 'db', { hide: ['analyses'] }));
 // seed: load bundled CSV files into database tables once (skip if table exists)
 for (const f of await files.list()) if (/\.csv$/i.test(f.id)) db.importTable(f.id.replace(/\.csv$/i, ''), await files.read(f.id));
 datasources.register(new ApiDataSource({
-  'world-population': { label: '示例 API：各国人口 (restcountries)', url: 'https://restcountries.com/v3.1/all?fields=name,region,population,area',
+  'world-population': { label: '示例：各国人口与面积', url: 'https://restcountries.com/v3.1/all?fields=name,region,population,area',
     pick: undefined },
 }));
 

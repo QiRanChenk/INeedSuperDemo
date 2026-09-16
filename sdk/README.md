@@ -41,7 +41,7 @@ db.tables(); db.columns('sales'); db.count('sales');
 ```js
 datasources.register(new FileDataSource('data'));                 // data/ 下的 .csv/.json
 datasources.register(new ApiDataSource({ users: { url: 'https://...', pick: 'data.list' } }));
-datasources.register(new SqliteDataSource(db));                   // 数据库每张表 = 一个数据集；read('sql:SELECT ...') 支持只读 SQL
+datasources.register(new SqliteDataSource(db, 'db', { hide: ['analyses'] }));  // 每张表 = 一个数据集（hide 隐藏内部表，_ 开头自动隐藏）；read('sql:SELECT ...') 只读 SQL
 await datasources.catalog();          // 所有源及其数据集
 await datasources.read('file/sales.csv');   // "源名/数据集id"
 await datasources.read('db/sales');         // 数据库表

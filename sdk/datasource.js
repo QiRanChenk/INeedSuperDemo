@@ -74,8 +74,12 @@ export class ApiDataSource {
 // ---------- SQLite database (sdk/db.js) ----------
 export class SqliteDataSource {
   /** db: result of openDb(). Every table becomes a dataset; read(id) accepts a table name or "sql:SELECT ..." */
-  constructor(db, name = 'db') { this.db = db; this.name = name; this.kind = 'database'; }
-  async list() { return this.db.tables().map(t => ({ id: t, label: `表 ${t}`, meta: { rows: this.db.count(t), columns: this.db.columns(t).map(c => c.name) } })); }
+  /** opts.hide: table names not to list (internal tables); tables starting with "_" are always hidden. */
+  constructor(db, name = 'db', { hide = [] } = {}) { this.db = db; this.name = name; this.kind = 'database'; this.hide = new Set(hide); }
+  async list() {
+    return this.db.tables().filter(t => !t.startsWith('_') && !this.hide.has(t))
+      .map(t => ({ id: t, label: t, meta: { rows: this.db.count(t), columns: this.db.columns(t).map(c => c.name) } }));
+  }
   async read(id, { limit } = {}) {
     if (String(id).startsWith('sql:')) {
       const { assertReadOnly } = await import('./db.js');

@@ -9,16 +9,16 @@
 <body>
 <header>
   <h1 id="title">数据洞察助手</h1>
-  <p class="sub">选择数据源，提出问题，AI 帮你读懂数据并给出建议</p>
+  <p class="sub">选择一份数据，提出问题，智能助手帮你读懂数据并给出建议</p>
 </header>
 
 <main>
   <section class="card">
-    <h2>1. 数据源</h2>
+    <h2>1. 选择数据</h2>
     <div class="row">
       <select id="source"></select>
       <button id="reload" class="ghost">刷新</button>
-      <label class="upload">上传 CSV/JSON <input type="file" id="file" accept=".csv,.json" hidden></label>
+      <label class="upload">上传表格文件 <input type="file" id="file" accept=".csv,.json" hidden></label>
     </div>
     <div id="preview" class="preview muted">尚未加载数据</div>
   </section>
@@ -42,7 +42,7 @@
   </section>
 
   <section class="card">
-    <h2>历史分析 <span class="muted small">（存于项目数据库 data/app.db）</span></h2>
+    <h2>历史分析</h2>
     <ul id="history" class="hist muted">暂无</ul>
   </section>
 </main>

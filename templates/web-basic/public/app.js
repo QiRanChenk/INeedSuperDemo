@@ -14,7 +14,7 @@ async function init() {
   document.title = $('#title').textContent = info.project + ' · 数据洞察';
   directions = info.directions;
   renderChips();
-  if (!info.llmConfigured) $('#status').innerHTML = '<span class="error">LLM 未配置：请在壳的设置中填写 API Key</span>';
+  if (!info.llmConfigured) $('#status').innerHTML = '<span class="error">智能分析暂不可用，请联系管理员完成配置</span>';
   await Promise.all([loadSources(), loadHistory()]);
 }
 
@@ -23,7 +23,7 @@ async function loadHistory() {
   const ul = $('#history');
   if (!list.length) { ul.textContent = '暂无'; return; }
   ul.className = 'hist';
-  ul.innerHTML = list.map(a => `<li data-id="${a.id}"><span class="t">${esc(a.created_at)}</span><span class="q">${esc(a.question || '整体分析')} · ${esc(a.ref)}</span></li>`).join('');
+  ul.innerHTML = list.map(a => `<li data-id="${a.id}"><span class="t">${esc(a.created_at)}</span><span class="q">${esc(a.question || '整体分析')} · ${esc(String(a.ref).split('/').pop())}</span></li>`).join('');
   ul.onclick = async e => { const li = e.target.closest('li'); if (!li) return; const a = await api(`api/analyses/${li.dataset.id}`); $('#resultCard').hidden = false; $('#result').innerHTML = md(a.markdown); $('#resultCard').scrollIntoView({ behavior: 'smooth' }); };
 }
 
@@ -31,11 +31,17 @@ async function loadSources() {
   catalog = await api('api/datasources');
   const sel = $('#source');
   sel.innerHTML = '';
-  for (const src of catalog) for (const it of src.items) {
-    if (it.id === '__error__') continue;
-    const o = document.createElement('option');
-    o.value = `${src.name}/${it.id}`; o.textContent = `[${src.kind}] ${it.label}`;
-    sel.appendChild(o);
+  const GROUP = { file: '文件', database: '数据表', api: '在线数据' };
+  for (const src of catalog) {
+    const items = src.items.filter(it => it.id !== '__error__');
+    if (!items.length) continue;
+    const g = document.createElement('optgroup'); g.label = GROUP[src.kind] || src.kind;
+    for (const it of items) {
+      const o = document.createElement('option');
+      o.value = `${src.name}/${it.id}`; o.textContent = it.label + (it.meta?.rows != null ? `（${it.meta.rows} 行）` : '');
+      g.appendChild(o);
+    }
+    sel.appendChild(g);
   }
   if (sel.value) await preview();
 }
@@ -72,7 +78,7 @@ async function analyze() {
       body: JSON.stringify({ ref: $('#source').value, question: $('#question').value, context: $('#context').value, directions: [...selected] }) });
     $('#resultCard').hidden = false;
     $('#result').innerHTML = md(r.markdown);
-    st.textContent = '完成，已保存到数据库';
+    st.textContent = '分析完成，已保存到历史记录';
     $('#resultCard').scrollIntoView({ behavior: 'smooth' });
     loadHistory();
   } catch (e) { st.innerHTML = `<span class="error">失败：${esc(e.message)}</span>`; }
@@ -84,7 +90,7 @@ async function upload(file) {
   const r = await api(`api/upload?name=${encodeURIComponent(file.name)}`, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: text });
   await loadSources();
   $('#source').value = r.ref; await preview();
-  $('#status').textContent = `已导入数据库表 ${r.imported.table}（${r.imported.imported} 行）`;
+  $('#status').textContent = `已导入「${r.imported.table}」，共 ${r.imported.imported} 行`;
 }
 
 // tiny markdown renderer: headings, bold, lists, tables, paragraphs
