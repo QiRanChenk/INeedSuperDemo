@@ -44,6 +44,7 @@ export function getSettings() {
     temperature: Number.isFinite(s.temperature) ? s.temperature : 0.3,
     maxIterations: Number.isInteger(s.maxIterations) && s.maxIterations >= 1 ? s.maxIterations : 25,
     contextWindow: Number.isInteger(s.contextWindow) && s.contextWindow >= 1000 ? s.contextWindow : 1_000_000, // tokens
+    stream: s.stream !== false, // streaming chat completions; turn off for gateways that mangle SSE
     // LLM used INSIDE generated projects (env SUPERDEMO_LLM_*). useShell=true -> same as the shell agent.
     projectLlm: {
       useShell: pl.useShell !== false,

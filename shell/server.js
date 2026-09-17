@@ -6,9 +6,9 @@ import { PROJECT_TYPES, listProjects, createProject, deleteProject, readProject,
 import * as runner from './runner.js';
 import { proxyMiddleware } from './proxy.js';
 import { testConnection } from './llm.js';
-import { runAgent, isBusy, usageSummary, generateProjectName, getContextInfo } from './agent.js';
+import { runAgent, attachRun, isBusy, usageSummary, generateProjectName, getContextInfo } from './agent.js';
 import { summary as usageLogSummary, readLog, backfillIfNeeded } from './usagelog.js';
-import { listSessions, createSession, renameSession, deleteSession, setCurrentSession, loadHistory, clearHistory } from './sessions.js';
+import { listSessions, createSession, renameSession, deleteSession, setCurrentSession, loadHistory, clearHistory, lastChatAt } from './sessions.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -28,7 +28,7 @@ const publicSettings = s => ({
 });
 app.get('/api/settings', (req, res) => res.json({ ...publicSettings(getSettings()), presets: PRESETS }));
 app.put('/api/settings', wrap(async (req, res) => {
-  const { baseUrl, apiKey, model, temperature, maxIterations, contextWindow, projectLlm } = req.body || {};
+  const { baseUrl, apiKey, model, temperature, maxIterations, contextWindow, stream, projectLlm } = req.body || {};
   const before = JSON.stringify(getProjectLlm());
   const patch = {};
   if (projectLlm && typeof projectLlm === 'object') {
@@ -46,6 +46,7 @@ app.put('/api/settings', wrap(async (req, res) => {
   if (maxIterations !== undefined && Number.isInteger(it) && it >= 1 && it <= 200) patch.maxIterations = it;
   const cw = parseInt(contextWindow, 10);
   if (contextWindow !== undefined && Number.isInteger(cw) && cw >= 1000 && cw <= 100_000_000) patch.contextWindow = cw;
+  if (stream !== undefined) patch.stream = !!stream;
   const s = saveSettings(patch);
   // project-side LLM changed -> restart running projects so the new env takes effect
   let restarted = [];
@@ -65,7 +66,10 @@ app.post('/api/settings/test-project', wrap(async (req, res) => {
 const withStatus = p => ({ ...p, ...runner.status(p.id), busy: isBusy(p.id), typeLabel: PROJECT_TYPES[p.type]?.label, hasUi: !!PROJECT_TYPES[p.type]?.hasUi });
 
 app.get('/api/project-types', (req, res) => res.json(Object.entries(PROJECT_TYPES).map(([id, t]) => ({ id, label: t.label, available: !!t.template }))));
-app.get('/api/projects', (req, res) => res.json(listProjects().map(withStatus)));
+// most recently chatted first; never-chatted projects fall back to creation time
+app.get('/api/projects', (req, res) => res.json(listProjects()
+  .map(p => ({ ...withStatus(p), lastChatAt: lastChatAt(p.id) }))
+  .sort((a, b) => String(b.lastChatAt || b.createdAt).localeCompare(String(a.lastChatAt || a.createdAt)))));
 app.post('/api/projects/name', wrap(async (req, res) => {
   const description = String(req.body?.description || '').trim();
   if (!description) return res.status(400).json({ error: '请先填写「你想做什么」' });
@@ -130,21 +134,33 @@ app.post('/api/projects/:id/chat', wrap(async (req, res) => {
   if (!message) return res.status(400).json({ error: 'message required' });
   if (isBusy(id)) return res.status(409).json({ error: '该项目正在处理上一条消息' });
 
+  const { send, end } = sse(res);
+  try { await runAgent(id, message, send, sid(req)); }
+  catch (e) { if (!e.emitted) send({ type: 'error', message: e.message }); } // run errors are already emitted as events by runAgent
+  finally { end(); }
+}));
+
+// Re-attach to an in-flight run (page reload / second tab): replays live state, then streams until done.
+app.get('/api/projects/:id/chat/attach', (req, res) => {
+  const { send, end } = sse(res);
+  const off = attachRun(req.params.id, ev => { send(ev); if (ev.type === 'done' || ev.type === 'error') end(); });
+  if (!off) { send({ type: 'idle' }); return end(); }
+  req.on('close', off);
+});
+
+function sse(res) {
   res.setHeader('content-type', 'text/event-stream');
   res.setHeader('cache-control', 'no-cache');
   res.setHeader('x-accel-buffering', 'no');
   res.flushHeaders();
-  const send = ev => res.write(`data: ${JSON.stringify(ev)}\n\n`);
-  const ping = setInterval(() => res.write(': ping\n\n'), 15000);
-  try {
-    await runAgent(id, message, send, sid(req));
-  } catch (e) {
-    send({ type: 'error', message: e.message });
-  } finally {
-    clearInterval(ping);
-    res.end();
-  }
-}));
+  let open = true;
+  res.on('close', () => { open = false; });
+  const ping = setInterval(() => { if (open) res.write(': ping\n\n'); }, 15000);
+  return {
+    send: ev => { if (open) res.write(`data: ${JSON.stringify(ev)}\n\n`); },
+    end: () => { clearInterval(ping); if (open) { open = false; res.end(); } },
+  };
+}
 
 // ---- boot ----
 async function boot() {

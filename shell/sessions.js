@@ -93,6 +93,14 @@ export function saveHistory(id, sid, history) {
   }
 }
 
+/** ISO time of the most recent chat activity across all sessions; null if the project has never been chatted with. Read-only (no index creation). */
+export function lastChatAt(id) {
+  try {
+    const idx = JSON.parse(fs.readFileSync(indexFile(id), 'utf8'));
+    return idx.list.map(s => s.updatedAt).filter(Boolean).sort().pop() || null;
+  } catch { return null; }
+}
+
 export function clearHistory(id, sid) { saveHistory(id, resolveSession(id, sid), []); }
 
 function countUserMessages(id, sid) {

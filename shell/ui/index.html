@@ -9,7 +9,7 @@
 </head>
 <body>
 <aside id="sidebar">
-  <div class="brand">⚡ SuperDemo <span class="ver">v0.1</span></div>
+  <div class="brand"><span class="brand-text">⚡ SuperDemo <span class="ver">v0.1</span></span><button id="sbToggle" class="ghost sb-toggle" title="折叠侧栏 (⌘/Ctrl+B)" aria-label="折叠侧栏">«</button></div>
   <button id="newProject" class="primary wide">+ 新建项目</button>
   <ul id="projectList" class="plist"></ul>
   <div class="spacer"></div>
@@ -94,6 +94,7 @@
     <div class="row"><label class="inline">Temperature<input id="stTemp" type="number" step="0.1" min="0" max="2"></label>
       <label class="inline">最大迭代<input id="stIter" type="number" min="1" max="200"></label>
       <label class="inline">上下文窗口 (tokens)<input id="stCtx" type="number" min="1000" step="1000" placeholder="1000000"></label></div>
+    <label class="check"><input type="checkbox" id="stStream" checked> 流式输出（逐字显示；个别网关不支持 SSE 时可关闭）</label>
     <div id="stResult" class="small muted"></div>
     <div class="row end"><button type="button" id="stTest" class="ghost">保存并测试连接</button><button type="submit" class="primary">保存</button></div>
 

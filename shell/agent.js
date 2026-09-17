@@ -25,17 +25,29 @@ function tool(name, description, props, required = []) {
 
 // ---- token usage ----
 function usageFile(id) { return path.join(projectDir(id), '.superdemo', 'usage.json'); }
-const emptyUsage = () => ({ input: 0, output: 0, cached: 0, total: 0, calls: 0 });
+// ms / timedOutput: wall-clock time and output tokens of calls that carried timing -> average output speed (t/s). lastSpeed: most recent call.
+const emptyUsage = () => ({ input: 0, output: 0, cached: 0, total: 0, calls: 0, ms: 0, timedOutput: 0, lastSpeed: null });
 
 /** Normalize OpenAI / DeepSeek / Qwen / GLM usage shapes into { input, output, cached, total }. */
-export function normalizeUsage(u) {
+export function normalizeUsage(u, ms, ttft) {
   if (!u) return null;
   const input = u.prompt_tokens ?? u.input_tokens ?? 0;
   const output = u.completion_tokens ?? u.output_tokens ?? 0;
   const cached = u.prompt_cache_hit_tokens ?? u.prompt_tokens_details?.cached_tokens ?? u.cached_tokens ?? 0;
-  return { input, output, cached, total: u.total_tokens ?? input + output };
+  const n = { input, output, cached, total: u.total_tokens ?? input + output };
+  if (ms > 0) n.ms = ms;
+  if (ttft > 0 && ms > ttft) n.gen = ms - ttft; // streaming: generation time after first token
+  return n;
 }
-function addUsage(acc, u) { acc.input += u.input; acc.output += u.output; acc.cached += u.cached; acc.total += u.total; acc.calls += 1; return acc; }
+/** Output tokens per second for one call. Streaming: over generation time (after first token); non-streaming: whole request. */
+const genMs = u => (u.gen > 0 ? u.gen : u.ms);
+export const speedOf = u => u && genMs(u) > 0 && u.output > 0 ? Math.round(u.output / (genMs(u) / 1000)) : null;
+function addUsage(acc, u) {
+  acc.input += u.input; acc.output += u.output; acc.cached += u.cached; acc.total += u.total; acc.calls += 1;
+  if (u.ms > 0) { acc.ms = (acc.ms || 0) + genMs(u); acc.timedOutput = (acc.timedOutput || 0) + u.output; acc.lastSpeed = speedOf(u); }
+  return acc;
+}
+const withSpeed = acc => ({ ...acc, avgSpeed: acc.ms > 0 ? Math.round(acc.timedOutput / (acc.ms / 1000)) : null });
 
 export function loadProjectUsage(id) {
   try { return { ...emptyUsage(), ...JSON.parse(fs.readFileSync(usageFile(id), 'utf8')) }; } catch { return emptyUsage(); }
@@ -50,10 +62,15 @@ function recordProjectUsage(id, u, sid = '') {
 /** Session usage = sum over one session's history. */
 export function sessionUsage(id, sid) {
   const acc = emptyUsage();
-  for (const m of loadHistory(id, sid)) if (m.usage) addUsage(acc, m.usage);
-  return acc;
+  // older messages lack usage.ms: approximate the call duration from the gap to the preceding message (pushed right before the LLM call)
+  let prev = null;
+  for (const m of loadHistory(id, sid)) {
+    if (m.usage) addUsage(acc, m.usage.ms > 0 || !(prev?.ts && m.ts > prev.ts) ? m.usage : { ...m.usage, ms: m.ts - prev.ts });
+    prev = m;
+  }
+  return withSpeed(acc);
 }
-export function usageSummary(id, sid) { return { session: sessionUsage(id, sid), project: loadProjectUsage(id) }; }
+export function usageSummary(id, sid) { return { session: sessionUsage(id, sid), project: withSpeed(loadProjectUsage(id)) }; }
 
 // ---- context compaction ----
 // Full detail is kept for the current and previous turn; older tool results / file contents are collapsed to one line.
@@ -110,8 +127,32 @@ function compactMessage(m) {
   return m;
 }
 
-const running = new Set();
+// In-flight runs: projectId -> { sid, subs, live }. Every UI event fans out to all subscribers (initiating tab + any tab that
+// attached later). `live` holds only the not-yet-persisted state (current iteration + streamed delta) so a late attacher can
+// catch up after rendering the persisted history.
+const running = new Map();
 export function isBusy(id) { return running.has(id); }
+function makeRun(sid, onEvent) {
+  const run = { sid, subs: new Set(onEvent ? [onEvent] : []), live: { iteration: 0, content: '', reasoning: '' }, ended: false };
+  run.emit = ev => {
+    const l = run.live;
+    if (ev.type === 'thinking') { l.iteration = ev.iteration; l.content = ''; l.reasoning = ''; }
+    else if (ev.type === 'delta') { if (ev.content) l.content += ev.content; if (ev.reasoning) l.reasoning += ev.reasoning; }
+    else if (ev.type === 'text' || ev.type === 'reasoning' || ev.type === 'done') { l.content = ''; l.reasoning = ''; }
+    for (const fn of run.subs) { try { fn(ev); } catch {} }
+  };
+  return run;
+}
+/** Subscribe to an in-flight run: replays the live (unpersisted) state, then streams events until done. Returns unsubscribe, or null if idle. */
+export function attachRun(id, onEvent) {
+  const run = running.get(id);
+  if (!run || run.ended) return null;
+  onEvent({ type: 'attached', session: run.sid, iteration: run.live.iteration });
+  if (run.live.iteration) onEvent({ type: 'thinking', iteration: run.live.iteration });
+  if (run.live.content || run.live.reasoning) onEvent({ type: 'delta', content: run.live.content || undefined, reasoning: run.live.reasoning || undefined });
+  run.subs.add(onEvent);
+  return () => run.subs.delete(onEvent);
+}
 
 function systemPrompt(project) {
   let sdkDoc = '';
@@ -204,9 +245,12 @@ export async function runAgent(id, userMessage, onEvent, sessionId) {
   const project = readProject(id);
   if (!project) throw new Error('project not found');
   if (running.has(id)) throw new Error('该项目正在处理上一条消息');
-  running.add(id);
-  try { return await runAgentInner(project, userMessage, onEvent, resolveSession(id, sessionId)); }
-  finally { running.delete(id); }
+  const sid = resolveSession(id, sessionId);
+  const run = makeRun(sid, onEvent);
+  running.set(id, run);
+  try { return await runAgentInner(project, userMessage, run.emit, sid); }
+  catch (e) { run.emit({ type: 'error', message: e.message }); e.emitted = true; throw e; }
+  finally { run.ended = true; running.delete(id); run.subs.clear(); }
 }
 
 async function runAgentInner(project, userMessage, onEvent, sid) {
@@ -231,8 +275,8 @@ async function runAgentInner(project, userMessage, onEvent, sid) {
   let finalText = '';
   for (let i = 0; i < settings.maxIterations; i++) {
     onEvent({ type: 'thinking', iteration: i + 1 });
-    const { message, usage } = await chat({ messages, tools: TOOLS, settings });
-    const nu = normalizeUsage(usage);
+    const { message, usage, ms, ttft } = await chat({ messages, tools: TOOLS, settings, onDelta: d => onEvent({ type: 'delta', ...d }) });
+    const nu = normalizeUsage(usage, ms, ttft);
 
     const assistant = { role: 'assistant', content: message.content ?? '', ts: Date.now() };
     if (nu) { assistant.usage = nu; recordProjectUsage(id, nu, sid); }

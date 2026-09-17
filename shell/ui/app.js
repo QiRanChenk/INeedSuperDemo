@@ -28,6 +28,8 @@ async function loadProjects() {
     ul.appendChild(li);
     // a turn finished on the server that this tab was not streaming (e.g. page reload / other tab): refresh view
     if (wasBusy.get(p.id) && !p.busy && !streams.has(p.id) && current?.id === p.id) { loadHistory(); reloadFrame(); }
+    // a turn started elsewhere (other tab): re-render history, which attaches to the live run
+    if (p.busy && !wasBusy.get(p.id) && !streams.has(p.id) && current?.id === p.id) loadHistory();
     wasBusy.set(p.id, p.busy);
   }
   if (current) { const fresh = projects.find(p => p.id === current.id); if (fresh) current = fresh; }
@@ -102,7 +104,10 @@ const fmt = n => n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e4 ? (n / 1e3).to
 function usageLine(u) {
   if (!u || !u.calls) return '<span class="muted">暂无</span>';
   const hit = u.input ? Math.round(u.cached / u.input * 100) : 0;
-  return `输入 <b>${fmt(u.input)}</b> <span class="sep">·</span> 输出 <b>${fmt(u.output)}</b> <span class="sep">·</span> 缓存命中 <b>${hit}%</b> <span class="sep">·</span> 合计 <b>${fmt(u.total)}</b> <span class="sep">·</span> ${u.calls} 次调用`;
+  // speed: latest call first (what the user just experienced); average over all timed calls in the tooltip
+  const spd = u.lastSpeed ?? u.avgSpeed;
+  const speed = spd ? ` <span class="sep">·</span> <span title="最近一次调用 ${u.lastSpeed ?? '—'} t/s · 平均 ${u.avgSpeed ?? '—'} t/s，按首字后的生成时长计算）">速度 <b>${spd}</b> t/s</span>` : '';
+  return `输入 <b>${fmt(u.input)}</b> <span class="sep">·</span> 输出 <b>${fmt(u.output)}</b> <span class="sep">·</span> 缓存命中 <b>${hit}%</b> <span class="sep">·</span> 合计 <b>${fmt(u.total)}</b> <span class="sep">·</span> ${u.calls} 次调用${speed}`;
 }
 function renderUsage(pid, data) {
   if (viewKey() !== pid) return;
@@ -164,7 +169,7 @@ async function loadHistory() {
     if (m.role === 'tool') addToolResult(pid, m.name, m.content);
   }
   if (!hist.length) addSys(pid, '新会话。项目代码与其他会话共享，对话记忆从这里重新开始。');
-  if (isBusy(current)) showThinking(pid, '处理中…');
+  if (isBusy(current)) { showThinking(pid, '处理中…'); if (!streams.has(current.id)) attach(current.id); }
   loadContext();
   box.scrollTop = box.scrollHeight;
 }
@@ -206,6 +211,74 @@ function showThinking(pid, text) {
 }
 function hideThinking(pid) { if (viewKey() === pid) $('#thinking')?.remove(); }
 
+// ---------- streaming bubbles ----------
+// One in-progress assistant bubble / reasoning block per view; finalized by the matching 'text' / 'reasoning' / 'done' event.
+const live = new Map(); // pid -> { msg, reasoning }
+function liveOf(pid) { let l = live.get(pid); if (!l) { l = {}; live.set(pid, l); } return l; }
+function onDelta(pid, ev) {
+  if (viewKey() !== pid) return;
+  const l = liveOf(pid), box = $('#messages');
+  const follow = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
+  if (ev.reasoning) {
+    if (!l.reasoning) { l.reasoning = addReasoning(pid, ''); l.reasoning.classList.add('live'); l.reasoning.open = true; }
+    l.reasoning.querySelector('pre').textContent += ev.reasoning;
+    l.reasoning.querySelector('summary').textContent = `模型思考中（${l.reasoning.querySelector('pre').textContent.length} 字）`;
+  }
+  if (ev.content) {
+    // first answer token: the thinking phase is over -> settle the reasoning block (collapsed) while the answer streams
+    if (l.reasoning?.classList.contains('live')) { const d = l.reasoning; d.classList.remove('live'); d.open = false; d.querySelector('summary').textContent = `模型思考（${d.querySelector('pre').textContent.length} 字）`; }
+    if (!l.msg) { l.msg = addMsg(pid, 'assistant', ''); l.msg.classList.add('live'); }
+    l.msg.textContent += ev.content;
+  }
+  if (follow) box.scrollTop = box.scrollHeight;
+}
+function finishText(pid, content) {
+  const l = live.get(pid);
+  if (l?.msg) { l.msg.textContent = content; l.msg.classList.remove('live'); l.msg = null; }
+  else if (content) addMsg(pid, 'assistant', content);
+}
+function finishReasoning(pid, content) {
+  const l = live.get(pid);
+  if (l?.reasoning) { const d = l.reasoning; d.querySelector('pre').textContent = content; d.querySelector('summary').textContent = `模型思考（${content.length} 字）`; d.classList.remove('live'); d.open = false; l.reasoning = null; }
+  else addReasoning(pid, content);
+}
+function dropLive(pid) { const l = live.get(pid); if (l?.msg) l.msg.classList.remove('live'); if (l?.reasoning) l.reasoning.classList.remove('live'); live.delete(pid); }
+
+/** Read an SSE response, dispatching each event. onEvent may return a new pid (used by attach once the run's session is known). */
+async function readEvents(res, pid, onEvent) {
+  const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '';
+  while (true) {
+    const { value, done } = await reader.read(); if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let idx; while ((idx = buf.indexOf('\n\n')) >= 0) {
+      const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
+      const line = chunk.split('\n').find(l => l.startsWith('data: ')); if (!line) continue;
+      pid = onEvent(pid, JSON.parse(line.slice(6))) ?? pid;
+    }
+  }
+  return pid;
+}
+
+/** Page reload / second tab: re-attach to a run that is still going on the server. */
+async function attach(projectId) {
+  if (streams.has(projectId)) return;
+  streams.set(projectId, true); renderHeader();
+  let pid = `${projectId}:`;
+  try {
+    const res = await fetch(`/api/projects/${projectId}/chat/attach`);
+    if (!res.ok) throw new Error(res.statusText);
+    pid = await readEvents(res, pid, (p, ev) => {
+      if (ev.type === 'attached') return `${projectId}:${ev.session}`;
+      if (ev.type === 'idle') return p;
+      handleEvent(p, ev); return p;
+    });
+  } catch {}
+  finally {
+    streams.delete(projectId); wasBusy.set(projectId, false); hideThinking(pid); dropLive(pid); renderHeader(); loadProjects();
+    if (current?.id === projectId) { loadHistory(); loadUsage(); loadSessions(true); } // persisted truth, in case anything was missed while attaching
+  }
+}
+
 // ---------- chat ----------
 async function send(text) {
   if (!current || isBusy(current) || !text.trim()) return;
@@ -217,18 +290,9 @@ async function send(text) {
   try {
     const res = await fetch(`/api/projects/${projectId}/chat`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: text, session: sid }) });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
-    const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '';
-    while (true) {
-      const { value, done } = await reader.read(); if (done) break;
-      buf += dec.decode(value, { stream: true });
-      let idx; while ((idx = buf.indexOf('\n\n')) >= 0) {
-        const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
-        const line = chunk.split('\n').find(l => l.startsWith('data: ')); if (!line) continue;
-        handleEvent(pid, JSON.parse(line.slice(6)));
-      }
-    }
+    await readEvents(res, pid, (p, ev) => { handleEvent(p, ev); return p; });
   } catch (e) { addMsg(pid, 'error', e.message); }
-  finally { streams.delete(projectId); wasBusy.set(projectId, false); hideThinking(pid); renderHeader(); loadProjects(); if (sameProject(pid)) loadSessions(true); }
+  finally { streams.delete(projectId); wasBusy.set(projectId, false); hideThinking(pid); dropLive(pid); renderHeader(); loadProjects(); if (sameProject(pid)) loadSessions(true); }
 }
 
 function handleEvent(pid, ev) {
@@ -236,13 +300,14 @@ function handleEvent(pid, ev) {
     case 'thinking': showThinking(pid, `思考中… (第 ${ev.iteration} 轮)`); break;
     case 'usage': renderUsage(pid, ev); UsageDialog.refreshSummary(); break;
     case 'context': renderContext(pid, ev); break;
-    case 'reasoning': addReasoning(pid, ev.content); break;
-    case 'text': addMsg(pid, 'assistant', ev.content); break;
+    case 'delta': onDelta(pid, ev); break;
+    case 'reasoning': finishReasoning(pid, ev.content); break;
+    case 'text': finishText(pid, ev.content); break;
     case 'tool_call': addTool(pid, ev.name, ev.args); break;
     case 'tool_result': addToolResult(pid, ev.name, ev.preview); break;
     case 'restarting': addSys(pid, '↻ 文件已修改，重启项目…'); break;
     case 'restarted': addSys(pid, ev.status === 'running' ? '✓ 项目已重启' : '✗ 重启后状态: ' + ev.status); if (ev.status === 'running' && sameProject(pid)) setTimeout(reloadFrame, 400); break;
-    case 'done': addMsg(pid, 'assistant', ev.content); if (sameProject(pid)) reloadFrame(); break;
+    case 'done': finishText(pid, ev.content); if (sameProject(pid)) reloadFrame(); break;
     case 'error': addMsg(pid, 'error', ev.message); break;
   }
 }
@@ -262,7 +327,7 @@ async function loadSettings() {
   sel.value = match ? match.id : 'custom';
   $('#stBase').value = settings.baseUrl; $('#stModel').value = settings.model; $('#stKey').value = '';
   $('#stKey').placeholder = settings.hasKey ? `已配置 ${settings.apiKey}（留空保持不变）` : 'sk-…';
-  $('#stTemp').value = settings.temperature; $('#stIter').value = settings.maxIterations; $('#stCtx').value = settings.contextWindow;
+  $('#stTemp').value = settings.temperature; $('#stIter').value = settings.maxIterations; $('#stCtx').value = settings.contextWindow; $('#stStream').checked = settings.stream !== false;
   // project-side LLM
   const pl = settings.projectLlm;
   $('#stUseShell').checked = pl.useShell;
@@ -296,7 +361,7 @@ function toggleSettings(open) {
   else if (dlg.open) dlg.close();
 }
 async function saveSettings() {
-  const body = { baseUrl: $('#stBase').value, model: $('#stModel').value, temperature: $('#stTemp').value, maxIterations: $('#stIter').value, contextWindow: $('#stCtx').value, projectLlm: collectProjectLlm() };
+  const body = { baseUrl: $('#stBase').value, model: $('#stModel').value, temperature: $('#stTemp').value, maxIterations: $('#stIter').value, contextWindow: $('#stCtx').value, stream: $('#stStream').checked, projectLlm: collectProjectLlm() };
   if ($('#stKey').value) body.apiKey = $('#stKey').value;
   const saved = await api('/api/settings', { method: 'PUT', body });
   await loadSettings();
@@ -383,6 +448,17 @@ const safeParse = s => { try { return JSON.parse(s); } catch { return {}; } };
 const firstLine = s => String(s ?? '').split('\n')[0].replace(/^\[系统\]\s*/, '↻ ').slice(0, 120);
 
 $('#tokenStats').onclick = () => UsageDialog.open('today');
+
+// ---------- sidebar collapse ----------
+function setSidebar(collapsed) {
+  document.body.classList.toggle('sb-collapsed', collapsed);
+  const b = $('#sbToggle'); b.textContent = collapsed ? '»' : '«';
+  b.title = b.ariaLabel = (collapsed ? '展开侧栏' : '折叠侧栏') + ' (⌘/Ctrl+B)';
+  try { localStorage.setItem('sbCollapsed', collapsed ? '1' : '0'); } catch {}
+}
+setSidebar(localStorage.getItem('sbCollapsed') === '1');
+$('#sbToggle').onclick = () => setSidebar(!document.body.classList.contains('sb-collapsed'));
+document.addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') { e.preventDefault(); setSidebar(!document.body.classList.contains('sb-collapsed')); } });
 
 (async () => {
   UsageDialog.refreshSummary();
