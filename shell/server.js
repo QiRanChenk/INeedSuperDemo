@@ -9,6 +9,8 @@ import { testConnection } from './llm.js';
 import { runAgent, attachRun, isBusy, usageSummary, generateProjectName, getContextInfo } from './agent.js';
 import { summary as usageLogSummary, readLog, backfillIfNeeded } from './usagelog.js';
 import { listSessions, createSession, renameSession, deleteSession, setCurrentSession, loadHistory, clearHistory, lastChatAt } from './sessions.js';
+import { zipProject, dockerInfo, imageInfo, buildImage, isBuilding, saveImage, runHints } from './export.js';
+import zlib from 'node:zlib';
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -103,6 +105,48 @@ app.get('/api/projects/:id/files', wrap((req, res) => res.json(fileTree(req.para
 app.get('/api/projects/:id/file', wrap((req, res) => {
   const abs = safePath(req.params.id, String(req.query.path || ''));
   res.type('text/plain').send(fs.readFileSync(abs, 'utf8'));
+}));
+
+// ---- export / deploy ----
+app.get('/api/projects/:id/export', wrap((req, res) => {
+  const { name, buffer } = zipProject(req.params.id);
+  res.setHeader('content-type', 'application/zip');
+  res.setHeader('content-disposition', `attachment; filename="${req.params.id}.zip"; filename*=UTF-8''${encodeURIComponent(name)}`);
+  res.send(buffer);
+}));
+app.get('/api/projects/:id/image', wrap(async (req, res) => {
+  const p = readProject(req.params.id);
+  if (!p) return res.status(404).json({ error: 'not found' });
+  const docker = await dockerInfo();
+  const image = docker.available ? await imageInfo(req.params.id) : null;
+  res.json({ docker, image, building: isBuilding(req.params.id), hints: runHints(req.params.id, p) });
+}));
+// build the image, streaming docker output as SSE lines
+app.post('/api/projects/:id/image', wrap(async (req, res) => {
+  const id = req.params.id, p = readProject(id);
+  if (!p) return res.status(404).json({ error: 'not found' });
+  if (isBuilding(id)) return res.status(409).json({ error: '该项目正在构建镜像' });
+  const docker = await dockerInfo();
+  if (!docker.available) return res.status(400).json({ error: docker.reason });
+  const { send, end } = sse(res);
+  try {
+    const r = await buildImage(id, l => send({ type: 'line', ...l }));
+    send({ type: 'done', ...r, image: r.ok ? await imageInfo(id) : null, hints: runHints(id, p) });
+  } catch (e) { send({ type: 'error', message: e.message }); }
+  finally { end(); }
+}));
+// docker save | gzip -> download
+app.get('/api/projects/:id/image.tar.gz', wrap(async (req, res) => {
+  const id = req.params.id;
+  if (!(await imageInfo(id))) return res.status(404).json({ error: '尚未构建镜像' });
+  res.setHeader('content-type', 'application/gzip');
+  res.setHeader('content-disposition', `attachment; filename="superdemo-${id}.tar.gz"`);
+  const proc = saveImage(id);
+  let err = '';
+  proc.stderr.on('data', d => { err += d; });
+  proc.on('exit', code => { if (code !== 0) { console.error('[export] docker save failed:', err.trim()); res.destroy(); } });
+  req.on('close', () => { try { proc.kill(); } catch {} });
+  proc.stdout.pipe(zlib.createGzip({ level: 1 })).pipe(res);
 }));
 
 // ---- chat ----

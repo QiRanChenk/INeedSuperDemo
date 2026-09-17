@@ -35,6 +35,7 @@
       <button id="btnRestart" class="ghost" title="重启">↻</button>
       <button id="btnLogs" class="ghost" title="日志">日志</button>
       <button id="btnFiles" class="ghost" title="文件">文件</button>
+      <button id="btnExport" class="ghost" title="导出 zip / 构建 Docker 镜像">导出</button>
       <button id="btnClear" class="ghost" title="清空对话">清空</button>
       <button id="btnDelete" class="ghost danger" title="删除项目">删除</button>
     </div>
@@ -135,6 +136,29 @@
     </div>
     <div id="usChart" class="chart"><div id="usTip" class="tip" hidden></div></div>
     <table class="ustable" id="usTable"></table>
+  </div>
+</dialog>
+
+<!-- export / deploy -->
+<dialog id="dlgExport" class="export-dlg">
+  <div class="dlg wide">
+    <div class="row between"><h3>导出 / 部署 · <span id="exName"></span></h3><button id="exClose" class="ghost">关闭</button></div>
+    <p class="muted small" style="margin:0">项目目录本身就是部署单元：代码 + <code>sdk/</code> + <code>data/</code>（SQLite 与文件数据）+ Dockerfile。导出内容<b>不含 API Key</b>，部署时在 <code>.env</code> 中填写。</p>
+    <section class="excard">
+      <h4>① 下载项目 zip</h4>
+      <div class="row"><a id="exZip" class="btn primary" download>⬇ 下载 zip</a><span class="muted small">解压后在任何装了 Node ≥ 22.13 或 Docker 的机器上运行：</span></div>
+      <pre id="exZipRun" class="cmd"></pre>
+    </section>
+    <section class="excard">
+      <h4>② 构建 Docker 镜像（在本机）</h4>
+      <div id="exDockerStatus" class="small muted">检测 Docker…</div>
+      <div class="row"><button id="exBuild" class="primary" disabled>🐳 构建镜像</button><a id="exSave" class="btn ghost" hidden download>⬇ 下载镜像 (.tar.gz)</a><span id="exImageInfo" class="muted small"></span></div>
+      <pre id="exLog" class="panel exlog" hidden></pre>
+      <div id="exRunWrap" hidden>
+        <div class="muted small">拿到目标服务器后（把 .tar.gz 和填好的 .env 一起复制过去）：</div>
+        <pre id="exRun" class="cmd"></pre>
+      </div>
+    </section>
   </div>
 </dialog>
 

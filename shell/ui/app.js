@@ -137,7 +137,7 @@ async function loadUsage() {
 function renderHeader() {
   const has = !!current, busy = isBusy(current);
   const live = has && (current.status === 'running' || current.status === 'starting');
-  for (const id of ['btnToggle', 'btnLogs', 'btnFiles', 'btnDelete']) $('#' + id).disabled = !has;
+  for (const id of ['btnToggle', 'btnLogs', 'btnFiles', 'btnExport', 'btnDelete']) $('#' + id).disabled = !has;
   $('#btnRestart').disabled = !live;
   $('#btnToggle').textContent = live ? '■ 停止' : '▶ 启动';
   $('#btnToggle').classList.toggle('start', has && !live);
@@ -440,6 +440,54 @@ $('#btnFiles').onclick = async () => {
   $('#dlgPanel').showModal();
 };
 $('#panelClose').onclick = () => $('#dlgPanel').close();
+
+// ---------- export / deploy ----------
+const fmtBytes = n => n >= 1e9 ? (n / 1e9).toFixed(2) + ' GB' : n >= 1e6 ? (n / 1e6).toFixed(0) + ' MB' : (n / 1e3).toFixed(0) + ' KB';
+async function openExport() {
+  const id = current.id;
+  $('#exName').textContent = current.name;
+  $('#exZip').href = `/api/projects/${id}/export`;
+  $('#exLog').hidden = true; $('#exLog').textContent = ''; $('#exRunWrap').hidden = true; $('#exSave').hidden = true; $('#exImageInfo').textContent = '';
+  $('#exBuild').disabled = true; $('#exBuild').textContent = '🐳 构建镜像';
+  $('#exDockerStatus').textContent = '检测 Docker…'; $('#exDockerStatus').className = 'small muted';
+  $('#dlgExport').showModal();
+  try {
+    const r = await api(`/api/projects/${id}/image`);
+    if (current?.id !== id) return;
+    $('#exZipRun').textContent = r.hints.zipRun;
+    const st = $('#exDockerStatus');
+    if (r.docker.available) { st.textContent = `✓ Docker ${r.docker.version} 可用`; st.className = 'small ok'; $('#exBuild').disabled = r.building; if (r.building) $('#exBuild').textContent = '构建中…'; }
+    else { st.textContent = '✗ ' + r.docker.reason + (r.docker.detail ? `（${r.docker.detail}）` : ''); st.className = 'small bad'; }
+    showImage(id, r.image, r.hints);
+  } catch (e) { $('#exDockerStatus').textContent = '✗ ' + e.message; $('#exDockerStatus').className = 'small bad'; }
+}
+function showImage(id, image, hints) {
+  if (!image) return;
+  $('#exImageInfo').textContent = `已有镜像 ${image.tag} · ${fmtBytes(image.size)} · ${new Date(image.created).toLocaleString()}`;
+  $('#exSave').hidden = false; $('#exSave').href = `/api/projects/${id}/image.tar.gz`;
+  $('#exRun').textContent = `${hints.dockerLoad}\n${hints.dockerRun}`;
+  $('#exRunWrap').hidden = false;
+}
+$('#btnExport').onclick = openExport;
+$('#exClose').onclick = () => $('#dlgExport').close();
+$('#exBuild').onclick = async () => {
+  const id = current.id, log = $('#exLog'), btn = $('#exBuild');
+  btn.disabled = true; btn.textContent = '构建中…'; log.hidden = false; log.textContent = ''; $('#exRunWrap').hidden = true;
+  const append = (cls, line) => { const atEnd = log.scrollHeight - log.scrollTop - log.clientHeight < 40; const el = document.createElement('span'); el.className = cls; el.textContent = line + '\n'; log.appendChild(el); if (atEnd) log.scrollTop = log.scrollHeight; };
+  try {
+    const res = await fetch(`/api/projects/${id}/image`, { method: 'POST' });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
+    await readEvents(res, id, (_, ev) => {
+      if (ev.type === 'line') append(ev.stream === 'err' ? 'sys' : 'out', ev.line);
+      else if (ev.type === 'error') append('err', '✗ ' + ev.message);
+      else if (ev.type === 'done') {
+        append(ev.ok ? 'ok' : 'err', ev.ok ? `✓ 构建完成 ${ev.image.tag} · ${fmtBytes(ev.image.size)} · ${(ev.ms / 1000).toFixed(1)}s` : `✗ 构建失败 (exit ${ev.code})`);
+        if (ev.ok) showImage(id, ev.image, ev.hints);
+      }
+    });
+  } catch (e) { append('err', '✗ ' + e.message); }
+  finally { btn.disabled = false; btn.textContent = '🐳 重新构建'; }
+};
 $('#composer').onsubmit = e => { e.preventDefault(); send($('#input').value); };
 $('#input').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send($('#input').value); } };
 
