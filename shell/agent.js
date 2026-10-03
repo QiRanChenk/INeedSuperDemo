@@ -340,7 +340,9 @@ function withImages(id, messages, vision) {
   });
 }
 const hasImage = messages => messages.some(m => Array.isArray(m.content));
-const isImageRejection = e => /HTTP 4\d\d/.test(e.message) && /image|vision|multimodal|multi-modal|图片|图像|不支持.*(格式|类型)/i.test(e.message);
+// "this model can't take images" (remembered) vs. any other image-related 4xx such as size limits (this call only)
+export const isImageUnsupported = e => /HTTP 4\d\d/.test(e.message) && /(not|n't|un)\s*support\w*[^.]{0,40}(image|vision|multi-?modal)|(image|vision|multi-?modal)[^.]{0,40}(not|n't|un)\s*support|不支持(图片|图像|多模态|视觉)|(图片|图像)[^。]{0,10}不支持|does not accept image/i.test(e.message);
+const isImageProblem = e => /HTTP 4\d\d/.test(e.message) && /image|vision|multi-?modal|图片|图像/i.test(e.message);
 
 /** Static per project (no file tree / logs) so the provider's prompt cache keeps hitting across turns. */
 function systemPrompt(project) {
@@ -624,19 +626,21 @@ async function runAgentInner(project, userMessage, run, sid) {
     }
     onEvent({ type: 'thinking', iteration: i + 1 });
     let r;
-    const call = () => {
-      const msgs = withImages(id, messages, visionEnabled(settings));
+    const call = (images = true) => {
+      const msgs = withImages(id, messages, images && visionEnabled(settings));
       return { images: hasImage(msgs), p: chat({ messages: msgs, tools: TOOLS, settings, signal, onDelta: d => onEvent({ type: 'delta', ...d }) }) };
     };
     try {
       let c = call();
       try { r = await c.p; }
       catch (e) {
-        // the model / gateway does not take images: remember (auto mode) and resend without screenshots
-        if (!c.images || !isImageRejection(e) || settings.vision === 'on') throw e;
-        settings.visionOk = false; saveSettings({ visionOk: false });
-        onEvent({ type: 'vision_off' });
-        c = call(); r = await c.p;
+        if (!c.images || !isImageProblem(e) || signal.aborted) throw e;
+        // resend without screenshots; only an explicit "images not supported" (auto mode) is remembered
+        c = call(false); r = await c.p;
+        if (isImageUnsupported(e) && settings.vision !== 'on') {
+          settings.visionOk = false; saveSettings({ visionOk: false, visionError: e.message.slice(0, 300) });
+          onEvent({ type: 'vision_off' });
+        } else console.warn(`[agent] ${id}: screenshots dropped for one call: ${e.message.slice(0, 200)}`);
       }
       if (c.images && settings.visionOk !== true) { settings.visionOk = true; saveSettings({ visionOk: true }); }
     } catch (e) { if (e instanceof StoppedError || signal.aborted) return stopped(); throw e; }
@@ -671,13 +675,12 @@ async function runAgentInner(project, userMessage, run, sid) {
     if (message.content) onEvent({ type: 'text', content: message.content });
 
     for (const tc of message.tool_calls) {
-      let args = {};
-      try { args = JSON.parse(tc.function.arguments || '{}'); } catch { args = {}; }
+      const args = parseArgs(tc.function.arguments);
       // stopped mid-batch: every tool_call still needs a tool message, otherwise the next request is rejected
       if (signal.aborted) { push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: '[已被用户停止，未执行]', ts: Date.now() }); continue; }
-      onEvent({ type: 'tool_call', name: tc.function.name, args: summarizeArgs(args) });
+      onEvent({ type: 'tool_call', name: tc.function.name, args: summarizeArgs(args || {}) });
       let result;
-      try { result = await execTool(project, tc.function.name, args, ctx); }
+      try { result = args ? await execTool(project, tc.function.name, args, ctx) : `ERROR: 工具参数不是合法的 JSON，未执行。请检查括号与引号后重新调用。原始参数开头：${String(tc.function.arguments).slice(0, 200)}`; }
       catch (e) { result = 'ERROR: ' + e.message; }
       onEvent({ type: 'tool_result', name: tc.function.name, preview: String(result).slice(0, 300) });
       push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: String(result), ts: Date.now() });
@@ -709,6 +712,15 @@ function strip(m) {
   if (rest.role === 'assistant' && rest.content == null) rest.content = '';
   if (interjection) rest.content = `[用户插话，请在继续当前任务时一并考虑] ${rest.content}`;
   return rest;
+}
+
+/** Tool-call arguments as an object; repairs the common slip of extra / missing closing brackets. null = unusable. */
+export function parseArgs(raw) {
+  const text = String(raw ?? '').trim() || '{}';
+  try { return JSON.parse(text); } catch {}
+  for (let t = text; t.length > 1 && /[}\]]$/.test(t); ) { t = t.slice(0, -1); try { return JSON.parse(t); } catch {} } // extra closers
+  for (const tail of ['}', ']}', '}]}', '"}', '"}]}']) { try { return JSON.parse(text + tail); } catch {} }               // truncated
+  return null;
 }
 
 function summarizeArgs(args) {

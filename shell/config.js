@@ -48,6 +48,7 @@ export function getSettings() {
     // screenshots for page_view / page_act: auto = send, and switch off by itself if the model rejects images
     vision: ['auto', 'on', 'off'].includes(s.vision) ? s.vision : 'auto',
     visionOk: typeof s.visionOk === 'boolean' ? s.visionOk : null, // auto-detected support of the current model
+    visionError: s.visionError || '', // provider message that switched screenshots off
     // LLM used INSIDE generated projects (env SUPERDEMO_LLM_*). useShell=true -> same as the shell agent.
     projectLlm: {
       useShell: pl.useShell !== false,

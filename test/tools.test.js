@@ -57,3 +57,22 @@ test('checkSyntax: accepts browser scripts and ESM, reports real errors', async 
   assert.match(await checkSyntax(w('bad.js', 'function (')), /SyntaxError/);
   assert.equal(await checkSyntax(w('x.css', '{{{')), null);
 });
+
+test('parseArgs repairs extra / missing closers, rejects garbage', async () => {
+  const { parseArgs } = await import('../shell/agent.js');
+  assert.deepEqual(parseArgs('{"a":1}}'), { a: 1 });
+  assert.deepEqual(parseArgs('{"actions":[{"type":"click"}]}}'), { actions: [{ type: 'click' }] });
+  assert.deepEqual(parseArgs('{"path":"x"'), { path: 'x' });
+  assert.deepEqual(parseArgs(''), {});
+  assert.equal(parseArgs('{bad'), null);
+});
+
+test('isImageUnsupported only fires on explicit "no images" errors', async () => {
+  const { isImageUnsupported } = await import('../shell/agent.js');
+  const e = m => new Error(m);
+  assert.ok(isImageUnsupported(e('LLM HTTP 400: {"error":"This model does not support image input"}')));
+  assert.ok(isImageUnsupported(e('LLM HTTP 400: 当前模型不支持图片输入')));
+  assert.ok(!isImageUnsupported(e('LLM HTTP 400: image size exceeds limit of 10MB')));
+  assert.ok(!isImageUnsupported(e('LLM HTTP 429: rate limit, image requests per minute exceeded')));
+  assert.ok(!isImageUnsupported(e('LLM HTTP 500: image_url fetch failed')));
+});

@@ -62,7 +62,7 @@ app.put('/api/settings', wrap(async (req, res) => {
   if (['auto', 'on', 'off'].includes(vision)) patch.vision = vision;
   // model / endpoint / vision mode changed -> image support has to be detected again
   const cur = getSettings();
-  if ((patch.vision && patch.vision !== cur.vision) || (patch.model && patch.model !== cur.model) || (patch.baseUrl && patch.baseUrl !== cur.baseUrl)) patch.visionOk = null;
+  if ((patch.vision && patch.vision !== cur.vision) || (patch.model && patch.model !== cur.model) || (patch.baseUrl && patch.baseUrl !== cur.baseUrl)) { patch.visionOk = null; patch.visionError = ''; }
   const s = saveSettings(patch);
   // project-side LLM changed -> restart running projects so the new env takes effect
   let restarted = [];
