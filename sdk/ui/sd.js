@@ -163,7 +163,8 @@
     const head = columns.map(c => `<th class="${c.num || c.align === 'right' ? 'sd-num' : ''}"${c.width ? ` style="width:${esc(c.width)}"` : ''}>${esc(c.label)}</th>`).join('') + (actions.length ? '<th class="sd-cell-actions">操作</th>' : '');
     const body = rows.map((r, i) => `<tr data-i="${i}"${onRowClick ? ' class="sd-clickable"' : ''}>${columns.map(c => {
       const v = c.render ? c.render(r) : esc(r[c.key] ?? '');
-      return `<td data-label="${esc(c.label)}" class="${c.num || c.align === 'right' ? 'sd-num' : ''}${c.mobile === false ? ' sd-col-desktop' : ''}${c.primary ? ' sd-cell-primary' : ''}">${v === '' || v == null ? '<span class="sd-muted">—</span>' : v}</td>`;
+      // one wrapper per cell: on phone cards the cell is a flex row (label | value), multi-part values must stay together
+      return `<td data-label="${esc(c.label)}" class="${c.num || c.align === 'right' ? 'sd-num' : ''}${c.mobile === false ? ' sd-col-desktop' : ''}${c.primary ? ' sd-cell-primary' : ''}"><div class="sd-cell">${v === '' || v == null ? '<span class="sd-muted">—</span>' : v}</div></td>`;
     }).join('')}${actions.length ? `<td class="sd-cell-actions">${actions.map((a, j) => (a.show && !a.show(r) ? '' : `<button type="button" class="sd-btn-sm ${a.danger ? 'sd-btn-danger' : a.primary ? 'sd-btn-primary' : ''}" data-a="${j}">${esc(a.text)}</button>`)).join('')}</td>` : ''}</tr>`).join('');
     el.innerHTML = `<div class="sd-table-wrap"><table class="sd-table sd-cards"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
     el.querySelector('tbody').onclick = e => {

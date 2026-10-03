@@ -174,8 +174,9 @@ export function injectFeedback(html, token) {
 }
 function feedbackWidget(token) {
   return `(function(){if(window.__sdFb)return;window.__sdFb=1;var host=document.createElement('div');host.style.cssText='position:fixed;right:16px;bottom:16px;z-index:2147483000';
-var r=host.attachShadow({mode:'open'});r.innerHTML='<style>*{box-sizing:border-box;font:14px/1.5 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}'
+host.title='提意见';var r=host.attachShadow({mode:'open'});r.innerHTML='<style>*{box-sizing:border-box;font:14px/1.5 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}'
 +'.b{border:0;border-radius:999px;padding:10px 16px;background:#1f2430;color:#fff;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.25);opacity:.92}.b:hover{opacity:1}'
++'@media (max-width:600px){.b{width:44px;height:44px;padding:0;font-size:0;opacity:.85}.b::before{content:"💬";font-size:20px}}'
 +'.p{position:absolute;right:0;bottom:52px;width:min(340px,calc(100vw - 32px));background:#fff;color:#1f2430;border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.25);padding:14px;display:none}'
 +'.p.o{display:block}h4{margin:0 0 4px;font-size:15px}p{margin:0 0 10px;color:#6b7280;font-size:12px}textarea,input{width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 10px;margin-bottom:8px;resize:vertical}'
 +'textarea{min-height:90px}.r{display:flex;gap:8px;justify-content:flex-end}.r button{border:1px solid #e5e7eb;background:#fff;border-radius:8px;padding:7px 14px;cursor:pointer}.r .s{background:#3b6cf6;border-color:#3b6cf6;color:#fff}.m{font-size:12px;color:#16a34a;margin-top:6px;min-height:16px}</style>'
@@ -186,7 +187,9 @@ s.onclick=function(){var v=t.value.trim();if(!v){t.focus();return;}s.disabled=tr
 fetch('/s/${token}/__sd/feedback',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:v,name:n.value,page:location.pathname.replace(/^\\/s\\/[^/]+/,'')+location.hash,viewport:innerWidth+'x'+innerHeight})})
 .then(function(x){return x.json().then(function(j){if(!x.ok)throw new Error(j.error||'提交失败');});}).then(function(){t.value='';m.style.color='#16a34a';m.textContent='已收到，谢谢！';setTimeout(function(){p.classList.remove('o');m.textContent='';},1500);})
 .catch(function(e){m.style.color='#dc2626';m.textContent=e.message;}).finally(function(){s.disabled=false;});};
-(document.body||document.documentElement).appendChild(host);})();`;
+(document.body||document.documentElement).appendChild(host);
+/* room below the last content so the button never permanently covers it */
+var pb=parseFloat(getComputedStyle(document.body).paddingBottom)||0;document.body.style.paddingBottom=(pb+72)+'px';})();`;
 }
 
 function waitingPage(project, st, visitor = false) {

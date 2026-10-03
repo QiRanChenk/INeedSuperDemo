@@ -190,6 +190,7 @@ table.sd-table { width: 100%; border-collapse: collapse; font-size: 14px; }
   .sd-cards tr { border: 1px solid var(--sd-line); border-radius: 10px; padding: 8px 12px; margin-bottom: 10px; background: #fff; }
   .sd-cards td { border: 0; padding: 4px 0; display: flex; justify-content: space-between; gap: 12px; text-align: right; }
   .sd-cards td::before { content: attr(data-label); color: var(--sd-muted); font-size: 13px; text-align: left; flex: none; }
+  .sd-cards td > .sd-cell { min-width: 0; overflow-wrap: anywhere; }
   .sd-cards td.sd-cell-primary { display: block; text-align: left; font-weight: 600; font-size: 15px; padding-bottom: 6px; }
   .sd-cards td.sd-cell-primary::before { content: none; }
   .sd-cards td.sd-cell-actions { justify-content: flex-end; padding-top: 8px; } .sd-cards td.sd-cell-actions::before { content: none; }
