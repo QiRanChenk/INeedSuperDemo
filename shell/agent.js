@@ -548,6 +548,7 @@ function endSnapshot(id, snap) {
 }
 
 const STOP_NOTE = '（用户已停止本轮处理）';
+const SOFT_STEPS = 60;
 
 async function runAgentInner(project, userMessage, run, sid) {
   const id = project.id;
@@ -613,11 +614,12 @@ async function runAgentInner(project, userMessage, run, sid) {
     webSeen = Date.now();
     if (web.length && i > 0) { push({ role: 'user', content: webErrorNote(web), ts: Date.now(), system: true }); onEvent({ type: 'web_errors', count: web.length }); rebuild(); }
     // budget: tell the model before it runs out, so it ends with something usable and a summary
-    const left = settings.maxIterations - i;
-    if (i > 0 && (left === Math.max(3, Math.round(settings.maxIterations * 0.2)) || left === 2)) {
+    // soft budget: a turn that is still going after SOFT_STEPS (or 80% of the hard limit) is asked to wrap up
+    const left = settings.maxIterations - i, soft = Math.min(SOFT_STEPS, Math.round(settings.maxIterations * 0.8));
+    if (i > 0 && (i === soft || left === 2)) {
       push({ role: 'user', system: true, ts: Date.now(), content: left === 2
         ? '[系统] 只剩最后 2 步：不要再改代码，确认项目能正常启动后，直接向用户总结已完成的内容、怎么演示、还没做完的部分。'
-        : `[系统] 本轮还剩 ${left} 步。请收尾：优先保证已做的页面和核心流程可用，不要再开新功能；剩余部分在总结里说明。` });
+        : `[系统] 本轮已进行 ${i} 步（上限 ${settings.maxIterations}）。请开始收尾：只修影响使用的问题，不再打磨细节或开新功能；检查一遍电脑和手机效果后向用户总结，没做完的写成建议。` });
       rebuild();
     }
     onEvent({ type: 'thinking', iteration: i + 1 });

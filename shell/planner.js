@@ -70,7 +70,7 @@ export function planToMessage(plan, description) {
     sec('演示亮点', p.highlights.map(x => `- ${x}`)),
     sec('这一版不做', p.outOfScope.map(x => `- ${x}`)),
     sec('用户补充', [p.notes].filter(Boolean)),
-    '## 工作方式（请照做，效率优先）',
+    '## 工作方式（请照做，效率优先，目标 40–60 步内完成）',
     '1. 读骨架的 server.js 和页面文件了解结构（SDK 用法看系统提示里的文档，不要读 sdk/ 源码），然后一次写好后端：数据表 + 接口 + 示例数据。示例数据贴近业务即可，用 http_request 校验一次，不要反复打磨数值和分布。',
     '2. 写页面：用组件库，每个页面一次写完整；方案外的功能不要加（想到的好点子写进最后的总结作为建议）。',
     '3. 用 page_view 看电脑效果、page_act 走通关键流程（弹窗里的字段用 label 定位，一次调用完成点开-填写-保存），再用 page_view 的 device="mobile" 看手机效果，有问题就修。',
