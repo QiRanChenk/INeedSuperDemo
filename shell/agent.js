@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
-import { chat } from './llm.js';
+import { chat, StoppedError } from './llm.js';
 import { getSettings, SDK_DIR } from './config.js';
 import { readProject, projectDir, safePath, fileTree } from './registry.js';
 import { restart, logs } from './runner.js';
@@ -99,7 +99,7 @@ export function getContextInfo(id, sid) {
 
 export function compactHistory(history) {
   let turn = 0;
-  const turnOf = history.map(m => (m.role === 'user' && !m.system) ? ++turn : turn);
+  const turnOf = history.map(m => (m.role === 'user' && !m.system && !m.interjection) ? ++turn : turn);
   const build = keep => history.map((m, i) => strip(turn - turnOf[i] < keep ? m : compactMessage(m)));
   let out = build(KEEP_FULL_TURNS);
   if (JSON.stringify(out).length > SOFT_LIMIT_CHARS) out = build(1);
@@ -133,7 +133,7 @@ function compactMessage(m) {
 const running = new Map();
 export function isBusy(id) { return running.has(id); }
 function makeRun(sid, onEvent) {
-  const run = { sid, subs: new Set(onEvent ? [onEvent] : []), live: { iteration: 0, content: '', reasoning: '' }, ended: false };
+  const run = { sid, subs: new Set(onEvent ? [onEvent] : []), live: { iteration: 0, content: '', reasoning: '' }, ended: false, ctrl: new AbortController(), queue: [] };
   run.emit = ev => {
     const l = run.live;
     if (ev.type === 'thinking') { l.iteration = ev.iteration; l.content = ''; l.reasoning = ''; }
@@ -143,11 +143,59 @@ function makeRun(sid, onEvent) {
   };
   return run;
 }
+/** Ask the in-flight run of a project to stop (aborts the LLM call / running command; the loop exits at the next checkpoint). */
+export function stopRun(id) {
+  const run = running.get(id);
+  if (!run || run.ended) return false;
+  run.ctrl.abort();
+  run.emit({ type: 'stopping' });
+  return true;
+}
+// Messages typed while a run is in progress and deliberately held back: projectId -> [{ id, text, sid, ts }].
+// When the run ends they are merged (same session) into one user message and sent as the next turn automatically.
+const pending = new Map();
+export function listQueue(id) { return pending.get(id) || []; }
+const broadcastQueue = id => { const run = running.get(id); if (run && !run.ended) run.emit({ type: 'queue', items: listQueue(id) }); };
+/** Add to the queue. Returns null when the project is idle (caller should send the message normally). */
+export function enqueue(id, text, sessionId) {
+  if (!running.has(id)) return null;
+  const sid = resolveSession(id, sessionId);
+  const items = listQueue(id);
+  items.push({ id: 'q' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), text, sid, ts: Date.now() });
+  pending.set(id, items);
+  broadcastQueue(id);
+  return items;
+}
+export function dequeue(id, qid) {
+  const items = listQueue(id).filter(q => q.id !== qid);
+  items.length ? pending.set(id, items) : pending.delete(id);
+  broadcastQueue(id);
+  return items;
+}
+export function clearQueue(id) { pending.delete(id); broadcastQueue(id); return []; }
+/** Run finished: fire the queued messages of one session as a single new turn (other sessions wait for the next round). */
+function startQueued(id) {
+  const items = listQueue(id);
+  if (!items.length) return false;
+  const sid = items[0].sid;
+  const batch = items.filter(q => q.sid === sid), rest = items.filter(q => q.sid !== sid);
+  rest.length ? pending.set(id, rest) : pending.delete(id);
+  runAgent(id, batch.map(q => q.text).join('\n\n'), null, sid).catch(e => console.error(`[queue] ${id}:`, e.message));
+  return true;
+}
+/** Queue a mid-run user message; it is appended to the conversation at the next checkpoint (after the current LLM call / tool batch). */
+export function interject(id, text) {
+  const run = running.get(id);
+  if (!run || run.ended) return false;
+  run.queue.push(text);
+  run.emit({ type: 'interjected', content: text });
+  return true;
+}
 /** Subscribe to an in-flight run: replays the live (unpersisted) state, then streams events until done. Returns unsubscribe, or null if idle. */
 export function attachRun(id, onEvent) {
   const run = running.get(id);
   if (!run || run.ended) return null;
-  onEvent({ type: 'attached', session: run.sid, iteration: run.live.iteration });
+  onEvent({ type: 'attached', session: run.sid, iteration: run.live.iteration, queue: listQueue(id) });
   if (run.live.iteration) onEvent({ type: 'thinking', iteration: run.live.iteration });
   if (run.live.content || run.live.reasoning) onEvent({ type: 'delta', content: run.live.content || undefined, reasoning: run.live.reasoning || undefined });
   run.subs.add(onEvent);
@@ -208,7 +256,7 @@ async function execTool(project, name, args, ctx) {
     }
     case 'run_command':
       ctx.changed.add('(command)');
-      return runCommand(projectDir(id), args.command);
+      return runCommand(projectDir(id), args.command, ctx.signal);
     case 'get_logs':
       return formatLogs(id, args.lines || 60);
     case 'restart_project': {
@@ -226,12 +274,12 @@ function formatLogs(id, n) {
   return ls.length ? ls.map(l => `[${l.stream}] ${l.line}`).join('\n') : '(no logs)';
 }
 
-function runCommand(cwd, command) {
+function runCommand(cwd, command, signal) {
   return new Promise(resolve => {
-    execFile('/bin/sh', ['-c', command], { cwd, timeout: 60_000, maxBuffer: 2_000_000, env: { ...process.env, CI: '1' } },
+    execFile('/bin/sh', ['-c', command], { cwd, timeout: 60_000, maxBuffer: 2_000_000, env: { ...process.env, CI: '1' }, signal },
       (err, stdout, stderr) => {
         let out = (stdout || '') + (stderr ? '\n[stderr]\n' + stderr : '');
-        if (err) out += `\n[exit] ${err.code ?? err.signal ?? err.message}`;
+        if (err) out += err.name === 'AbortError' ? '\n[exit] 已被用户停止' : `\n[exit] ${err.code ?? err.signal ?? err.message}`;
         resolve(out.trim().slice(-8000) || '(no output)');
       });
   });
@@ -248,18 +296,34 @@ export async function runAgent(id, userMessage, onEvent, sessionId) {
   const sid = resolveSession(id, sessionId);
   const run = makeRun(sid, onEvent);
   running.set(id, run);
-  try { return await runAgentInner(project, userMessage, run.emit, sid); }
+  try { return await runAgentInner(project, userMessage, run, sid); }
   catch (e) { run.emit({ type: 'error', message: e.message }); e.emitted = true; throw e; }
-  finally { run.ended = true; running.delete(id); run.subs.clear(); }
+  finally { run.ended = true; running.delete(id); if (startQueued(id)) run.emit({ type: 'next' }); run.subs.clear(); } // 'next': queued messages started a follow-up turn, clients re-attach
 }
 
-async function runAgentInner(project, userMessage, onEvent, sid) {
+const STOP_NOTE = '（用户已停止本轮处理）';
+
+async function runAgentInner(project, userMessage, run, sid) {
   const id = project.id;
+  const onEvent = run.emit, signal = run.ctrl.signal;
   const settings = getSettings();
   const history = loadHistory(id, sid);
-  const ctx = { changed: new Set() };
+  const ctx = { changed: new Set(), signal };
   // persist after every message so the UI can replay an in-progress turn when switching projects/sessions
   const push = m => { history.push(m); saveHistory(id, sid, history); };
+  // Mid-run user messages (interjections) become extra user turns at checkpoints so the model sees them before continuing.
+  const drain = () => {
+    if (!run.queue.length) return false;
+    for (const t of run.queue.splice(0)) push({ role: 'user', content: t, ts: Date.now(), interjection: true });
+    return true;
+  };
+  // User pressed stop: close the turn with an assistant note (keeps the history valid for the next request) and finish.
+  const stopped = () => {
+    const last = history[history.length - 1];
+    if (last?.role !== 'assistant' || last.tool_calls) push({ role: 'assistant', content: STOP_NOTE, ts: Date.now(), stopped: true });
+    onEvent({ type: 'done', session: sid, content: '', stopped: true });
+    return '';
+  };
 
   push({ role: 'user', content: userMessage, ts: Date.now() });
   const system = { role: 'system', content: systemPrompt(project) };
@@ -275,10 +339,14 @@ async function runAgentInner(project, userMessage, onEvent, sid) {
   let finalText = '';
   for (let i = 0; i < settings.maxIterations; i++) {
     onEvent({ type: 'thinking', iteration: i + 1 });
-    const { message, usage, ms, ttft } = await chat({ messages, tools: TOOLS, settings, onDelta: d => onEvent({ type: 'delta', ...d }) });
+    let r;
+    try { r = await chat({ messages, tools: TOOLS, settings, signal, onDelta: d => onEvent({ type: 'delta', ...d }) }); }
+    catch (e) { if (e instanceof StoppedError || signal.aborted) return stopped(); throw e; }
+    const { message, usage, ms, ttft, aborted } = r;
     const nu = normalizeUsage(usage, ms, ttft);
 
     const assistant = { role: 'assistant', content: message.content ?? '', ts: Date.now() };
+    if (aborted) { if (!assistant.content && !message.reasoning_content) return stopped(); assistant.content += (assistant.content ? '\n\n' : '') + STOP_NOTE; assistant.stopped = true; }
     if (nu) { assistant.usage = nu; recordProjectUsage(id, nu, sid); }
     if (message.tool_calls?.length) assistant.tool_calls = message.tool_calls;
     if (message.reasoning_content) assistant.reasoning = message.reasoning_content; // deepseek-reasoner / GLM thinking
@@ -287,12 +355,19 @@ async function runAgentInner(project, userMessage, onEvent, sid) {
 
     if (nu) onEvent({ type: 'usage', ...usageSummary(id) });
     if (assistant.reasoning) onEvent({ type: 'reasoning', content: assistant.reasoning });
-    if (!message.tool_calls?.length) { finalText = message.content || ''; break; }
+    if (aborted) { onEvent({ type: 'text', content: assistant.content }); return stopped(); }
+    if (!message.tool_calls?.length) {
+      // model considers itself done, but the user added something meanwhile: show the answer and go another round
+      if (drain()) { if (message.content) onEvent({ type: 'text', content: message.content }); rebuild(); continue; }
+      finalText = message.content || ''; break;
+    }
     if (message.content) onEvent({ type: 'text', content: message.content });
 
     for (const tc of message.tool_calls) {
       let args = {};
       try { args = JSON.parse(tc.function.arguments || '{}'); } catch { args = {}; }
+      // stopped mid-batch: every tool_call still needs a tool message, otherwise the next request is rejected
+      if (signal.aborted) { push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: '[已被用户停止，未执行]', ts: Date.now() }); continue; }
       onEvent({ type: 'tool_call', name: tc.function.name, args: summarizeArgs(args) });
       let result;
       try { result = await execTool(project, tc.function.name, args, ctx); }
@@ -310,6 +385,8 @@ async function runAgentInner(project, userMessage, onEvent, sid) {
       const note = { role: 'user', content: `[系统] 项目已自动重启，状态=${st.status}。最近日志:\n${formatLogs(id, 25)}\n${st.status === 'running' ? '若已完成，请向用户总结；否则继续修复。' : '启动失败，请读取日志修复。'}`, ts: Date.now(), system: true };
       push(note);
     }
+    if (signal.aborted) return stopped();
+    drain();
     rebuild();
   }
 
@@ -319,8 +396,9 @@ async function runAgentInner(project, userMessage, onEvent, sid) {
 }
 
 function strip(m) {
-  const { ts, system, reasoning, name, usage, ...rest } = m; // reasoning must NOT be sent back (DeepSeek rejects it)
+  const { ts, system, reasoning, name, usage, stopped, interjection, ...rest } = m; // reasoning must NOT be sent back (DeepSeek rejects it)
   if (rest.role === 'assistant' && rest.content == null) rest.content = '';
+  if (interjection) rest.content = `[用户插话，请在继续当前任务时一并考虑] ${rest.content}`;
   return rest;
 }
 

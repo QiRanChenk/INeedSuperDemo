@@ -6,7 +6,7 @@ import { PROJECT_TYPES, listProjects, createProject, deleteProject, readProject,
 import * as runner from './runner.js';
 import { proxyMiddleware } from './proxy.js';
 import { testConnection } from './llm.js';
-import { runAgent, attachRun, isBusy, usageSummary, generateProjectName, getContextInfo } from './agent.js';
+import { runAgent, attachRun, stopRun, interject, listQueue, enqueue, dequeue, clearQueue, isBusy, usageSummary, generateProjectName, getContextInfo } from './agent.js';
 import { summary as usageLogSummary, readLog, backfillIfNeeded } from './usagelog.js';
 import { listSessions, createSession, renameSession, deleteSession, setCurrentSession, loadHistory, clearHistory, lastChatAt } from './sessions.js';
 import { zipProject, dockerInfo, imageInfo, buildImage, isBuilding, saveImage, runHints } from './export.js';
@@ -184,10 +184,32 @@ app.post('/api/projects/:id/chat', wrap(async (req, res) => {
   finally { end(); }
 }));
 
+// Stop the in-flight run of a project (any tab may call this; all attached tabs see the resulting 'done' event).
+app.post('/api/projects/:id/chat/stop', wrap((req, res) => res.json({ stopped: stopRun(req.params.id) })));
+
+// Mid-run message: queued for the running turn. queued=false means the run already ended -> client sends it as a normal message.
+app.post('/api/projects/:id/chat/say', wrap((req, res) => {
+  const message = String(req.body?.message || '').trim();
+  if (!message) return res.status(400).json({ error: 'message required' });
+  res.json({ queued: interject(req.params.id, message) });
+}));
+
+// Held-back messages: sent together as the next turn once the current run ends. queued=false -> project idle, send normally.
+app.get('/api/projects/:id/chat/queue', wrap((req, res) => res.json({ items: listQueue(req.params.id) })));
+app.post('/api/projects/:id/chat/queue', wrap((req, res) => {
+  const message = String(req.body?.message || '').trim();
+  if (!message) return res.status(400).json({ error: 'message required' });
+  const items = enqueue(req.params.id, message, sid(req));
+  res.json({ queued: !!items, items: items || [] });
+}));
+app.delete('/api/projects/:id/chat/queue', wrap((req, res) => res.json({ items: clearQueue(req.params.id) })));
+app.delete('/api/projects/:id/chat/queue/:qid', wrap((req, res) => res.json({ items: dequeue(req.params.id, req.params.qid) })));
+
 // Re-attach to an in-flight run (page reload / second tab): replays live state, then streams until done.
 app.get('/api/projects/:id/chat/attach', (req, res) => {
   const { send, end } = sse(res);
-  const off = attachRun(req.params.id, ev => { send(ev); if (ev.type === 'done' || ev.type === 'error') end(); });
+  // end on the next tick so a trailing 'next' event (queued messages started another turn) still gets through
+  const off = attachRun(req.params.id, ev => { send(ev); if (ev.type === 'done' || ev.type === 'error') setImmediate(end); });
   if (!off) { send({ type: 'idle' }); return end(); }
   req.on('close', off);
 });

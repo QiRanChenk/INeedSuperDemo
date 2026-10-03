@@ -47,7 +47,7 @@ async function select(id) {
   $('#previewUrl').textContent = url;
   $('#btnOpen').href = url;
   await loadSessions();
-  await Promise.all([loadHistory(), loadUsage()]);
+  await Promise.all([loadHistory(), loadUsage(), loadQueue()]);
 }
 
 // ---------- sessions ----------
@@ -145,8 +145,13 @@ function renderHeader() {
   if (has && !live && $('#frame').src !== 'about:blank') $('#frame').src = 'about:blank';
   if (live && current.hasUi && $('#frame').src === 'about:blank') $('#frame').src = `/p/${current.id}/`;
   $('#btnClear').disabled = !has || busy;
-  $('#send').disabled = !has || busy;
-  $('#send').textContent = busy ? '处理中…' : '发送';
+  // busy: empty input -> stop button; typed text -> interject (queued into the running turn)
+  const sendBtn = $('#send'), typed = !!$('#input').value.trim(), isStopping = busy && stopping.has(current.id);
+  sendBtn.disabled = !has || isStopping;
+  sendBtn.textContent = !busy ? '发送' : isStopping ? '停止中…' : typed ? '↩ 插话' : '■ 停止';
+  sendBtn.classList.toggle('stop', busy && !typed);
+  sendBtn.title = !busy ? '' : typed ? '插话：当前步骤完成后 AI 会看到这条消息 (Enter)' : '停止本轮处理 (Esc)';
+  $('#queueBtn').hidden = !(busy && typed && !isStopping);
   $('#pName').textContent = current ? current.name : '选择或新建一个项目';
   $('#pMeta').textContent = current ? `${current.typeLabel} · ${current.status} · 端口 ${current.port} · id ${current.id}` : '';
 }
@@ -159,7 +164,7 @@ async function loadHistory() {
   if (viewKey() !== pid) return; // switched while fetching
   const box = $('#messages'); box.innerHTML = '';
   for (const m of hist) {
-    if (m.role === 'user') { m.system ? addSys(pid, firstLine(m.content)) : addMsg(pid, 'user', m.content); continue; }
+    if (m.role === 'user') { m.system ? addSys(pid, firstLine(m.content)) : m.interjection ? addInterjection(pid, m.content) : addMsg(pid, 'user', m.content); continue; }
     if (m.role === 'assistant') {
       if (m.reasoning) addReasoning(pid, m.reasoning);
       if (m.content) addMsg(pid, 'assistant', m.content);
@@ -186,6 +191,7 @@ function append(pid, el, force = false) {
 }
 function addMsg(pid, role, text) { const d = document.createElement('div'); d.className = 'msg ' + role; d.textContent = text; return append(pid, d, role === 'user'); }
 function addSys(pid, text) { return addMsg(pid, 'sys', text); }
+function addInterjection(pid, text) { const d = addMsg(pid, 'user', text); d.classList.add('interjection'); d.title = '插话（在 AI 处理过程中补充）'; return d; }
 function addTool(pid, name, args) {
   const d = document.createElement('div'); d.className = 'tool';
   const a = args && (args.path || args.command || (args.lines ? `${args.lines} lines` : ''));
@@ -268,36 +274,101 @@ async function attach(projectId) {
     const res = await fetch(`/api/projects/${projectId}/chat/attach`);
     if (!res.ok) throw new Error(res.statusText);
     pid = await readEvents(res, pid, (p, ev) => {
-      if (ev.type === 'attached') return `${projectId}:${ev.session}`;
+      if (ev.type === 'attached') { renderQueue(projectId, ev.queue || []); return `${projectId}:${ev.session}`; }
       if (ev.type === 'idle') return p;
       handleEvent(p, ev); return p;
     });
   } catch {}
   finally {
-    streams.delete(projectId); wasBusy.set(projectId, false); hideThinking(pid); dropLive(pid); renderHeader(); loadProjects();
+    streams.delete(projectId); stopDone(projectId); wasBusy.set(projectId, false); hideThinking(pid); dropLive(pid); renderHeader(); loadProjects();
+    if (autoNext.has(projectId)) return followNext(projectId);
     if (current?.id === projectId) { loadHistory(); loadUsage(); loadSessions(true); } // persisted truth, in case anything was missed while attaching
   }
 }
 
 // ---------- chat ----------
+/** Busy project: queue the text into the running turn. Falls back to a normal send if the run ended meanwhile. */
+async function interject(text) {
+  if (!current || !text.trim()) return;
+  const projectId = current.id, pid = viewKey();
+  $('#input').value = ''; renderHeader();
+  try {
+    const r = await api(`/api/projects/${projectId}/chat/say`, { method: 'POST', body: { message: text } });
+    if (!r.queued) { if (!isBusy(current)) return send(text); addMsg(pid, 'error', '未能插话：本轮已结束，请重新发送'); $('#input').value = text; renderHeader(); }
+  } catch (e) { addMsg(pid, 'error', '插话失败：' + e.message); $('#input').value = text; renderHeader(); }
+}
 async function send(text) {
-  if (!current || isBusy(current) || !text.trim()) return;
+  if (!current || !text.trim()) return;
+  if (isBusy(current)) return interject(text);
   const projectId = current.id, sid = currentSession, pid = viewKey();
+  $('#input').value = '';
   streams.set(projectId, true); renderHeader();
   addMsg(pid, 'user', text);
-  $('#input').value = '';
   showThinking(pid, '思考中…');
   try {
     const res = await fetch(`/api/projects/${projectId}/chat`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: text, session: sid }) });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
     await readEvents(res, pid, (p, ev) => { handleEvent(p, ev); return p; });
   } catch (e) { addMsg(pid, 'error', e.message); }
-  finally { streams.delete(projectId); wasBusy.set(projectId, false); hideThinking(pid); dropLive(pid); renderHeader(); loadProjects(); if (sameProject(pid)) loadSessions(true); }
+  finally { streams.delete(projectId); stopDone(projectId); wasBusy.set(projectId, false); hideThinking(pid); dropLive(pid); renderHeader(); loadProjects(); if (sameProject(pid)) loadSessions(true); followNext(projectId); }
 }
+// The server started the next turn from the message queue right after this one ended: attach to it (renders the merged user message first).
+const autoNext = new Set();
+function followNext(projectId) {
+  if (!autoNext.delete(projectId)) return;
+  if (current?.id === projectId) { current.busy = true; wasBusy.set(projectId, true); loadHistory(); }
+  else attach(projectId);
+}
+
+// ---------- message queue (held back until the current run ends, then sent together) ----------
+function renderQueue(projectId, items) {
+  if (current?.id !== projectId) return;
+  const bar = $('#queueBar'), list = $('#queueList');
+  bar.hidden = !items.length; $('#queueCount').textContent = items.length; list.innerHTML = '';
+  for (const q of items) {
+    const li = document.createElement('li'); li.title = q.text;
+    li.innerHTML = `<span>${esc(q.text)}</span><button type="button" title="移出队列">✕</button>`;
+    li.querySelector('button').onclick = async () => { try { renderQueue(projectId, (await api(`/api/projects/${projectId}/chat/queue/${q.id}`, { method: 'DELETE' })).items); } catch {} };
+    list.appendChild(li);
+  }
+}
+async function loadQueue() {
+  if (!current) { $('#queueBar').hidden = true; return; }
+  const id = current.id;
+  try { renderQueue(id, (await api(`/api/projects/${id}/chat/queue`)).items); } catch {}
+}
+/** Hold the text back; the server sends every queued message together as the next turn. Falls back to a normal send if idle. */
+async function enqueue(text) {
+  if (!current || !text.trim()) return;
+  const projectId = current.id, pid = viewKey();
+  $('#input').value = ''; renderHeader();
+  try {
+    const r = await api(`/api/projects/${projectId}/chat/queue`, { method: 'POST', body: { message: text, session: currentSession } });
+    if (!r.queued) return send(text);
+    renderQueue(projectId, r.items);
+  } catch (e) { addMsg(pid, 'error', '排队失败：' + e.message); $('#input').value = text; renderHeader(); }
+}
+$('#queueBtn').onclick = () => enqueue($('#input').value);
+$('#queueClear').onclick = async () => { if (!current) return; try { renderQueue(current.id, (await api(`/api/projects/${current.id}/chat/queue`, { method: 'DELETE' })).items); } catch {} };
+
+// ---------- stop ----------
+const stopping = new Set(); // projectIds with a pending stop request
+async function stop() {
+  if (!current || !isBusy(current) || stopping.has(current.id)) return;
+  const id = current.id;
+  stopping.add(id); renderHeader();
+  try { await api(`/api/projects/${id}/chat/stop`, { method: 'POST' }); }
+  catch (e) { stopping.delete(id); renderHeader(); addMsg(viewKey(), 'error', '停止失败：' + e.message); }
+}
+function stopDone(projectId) { stopping.delete(projectId); }
 
 function handleEvent(pid, ev) {
   switch (ev.type) {
     case 'thinking': showThinking(pid, `思考中… (第 ${ev.iteration} 轮)`); break;
+    case 'stopping': showThinking(pid, '正在停止…'); break;
+    case 'interjected': addInterjection(pid, ev.content); break;
+    case 'queue': renderQueue(String(pid).split(':')[0], ev.items); break;
+    case 'next': autoNext.add(String(pid).split(':')[0]); break;
     case 'usage': renderUsage(pid, ev); UsageDialog.refreshSummary(); break;
     case 'context': renderContext(pid, ev); break;
     case 'delta': onDelta(pid, ev); break;
@@ -307,7 +378,7 @@ function handleEvent(pid, ev) {
     case 'tool_result': addToolResult(pid, ev.name, ev.preview); break;
     case 'restarting': addSys(pid, '↻ 文件已修改，重启项目…'); break;
     case 'restarted': addSys(pid, ev.status === 'running' ? '✓ 项目已重启' : '✗ 重启后状态: ' + ev.status); if (ev.status === 'running' && sameProject(pid)) setTimeout(reloadFrame, 400); break;
-    case 'done': finishText(pid, ev.content); if (sameProject(pid)) reloadFrame(); break;
+    case 'done': finishText(pid, ev.content); if (ev.stopped) addSys(pid, '■ 已停止'); if (sameProject(pid)) reloadFrame(); break;
     case 'error': addMsg(pid, 'error', ev.message); break;
   }
 }
@@ -420,7 +491,7 @@ $('#btnClear').onclick = async () => { if (confirm('清空当前会话的对话�
 $('#btnDelete').onclick = async () => {
   if (!confirm(`删除项目「${current.name}」及其全部文件？不可恢复。`)) return;
   await api(`/api/projects/${current.id}`, { method: 'DELETE' });
-  current = null; currentSession = null; $('#frame').src = 'about:blank'; $('#messages').innerHTML = ''; $('#usage').hidden = true; $('#sessionBar').hidden = true;
+  current = null; currentSession = null; $('#frame').src = 'about:blank'; $('#messages').innerHTML = ''; $('#usage').hidden = true; $('#sessionBar').hidden = true; $('#queueBar').hidden = true;
   await loadProjects();
 };
 $('#btnLogs').onclick = async () => {
@@ -488,8 +559,13 @@ $('#exBuild').onclick = async () => {
   } catch (e) { append('err', '✗ ' + e.message); }
   finally { btn.disabled = false; btn.textContent = '🐳 重新构建'; }
 };
-$('#composer').onsubmit = e => { e.preventDefault(); send($('#input').value); };
-$('#input').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send($('#input').value); } };
+$('#composer').onsubmit = e => { e.preventDefault(); isBusy(current) ? stop() : send($('#input').value); };
+$('#input').onkeydown = e => {
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && isBusy(current)) { e.preventDefault(); return enqueue($('#input').value); }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send($('#input').value); }
+  if (e.key === 'Escape' && isBusy(current)) { e.preventDefault(); stop(); }
+};
+$('#input').oninput = () => { if (isBusy(current)) renderHeader(); };
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const safeParse = s => { try { return JSON.parse(s); } catch { return {}; } };

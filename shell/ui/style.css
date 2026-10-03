@@ -16,6 +16,8 @@ body.sb-collapsed .brand { padding: 10px 6px; justify-content: center; } body.sb
 button, .btn { font: inherit; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; text-decoration: none; }
 button.primary { background: var(--brand); border-color: var(--brand); color: #fff; } button.ghost { background: transparent; }
 button.danger { color: var(--danger); } button:disabled { opacity: .5; cursor: default; }
+button.primary.stop { background: var(--danger); border-color: var(--danger); }
+.msg.user.interjection { border-left: 3px solid var(--warn); }
 .wide { margin: 6px 14px; } .actions { display: flex; gap: 6px; flex: none; } .actions button, .actions .btn { white-space: nowrap; padding: 6px 10px; }
 .plist { list-style: none; margin: 8px 0; padding: 0 8px; overflow: auto; }
 .plist li { padding: 8px 10px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
@@ -37,6 +39,12 @@ button.danger { color: var(--danger); } button:disabled { opacity: .5; cursor: d
 .tool { align-self: flex-start; font-size: 12px; color: var(--muted); font-family: ui-monospace, Menlo, monospace; padding: 2px 6px; border-left: 2px solid var(--line); }
 .tool b { color: var(--ink); font-weight: 500; }
 .composer { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); background: var(--panel); }
+.composer-btns { display: flex; flex-direction: column; gap: 6px; } .composer-btns button { white-space: nowrap; }
+.queuebar { display: flex; align-items: center; gap: 10px; padding: 6px 14px; border-top: 1px solid var(--line); background: var(--panel); font-size: 12px; }
+.queuebar ul { flex: 1; min-width: 0; display: flex; gap: 6px; flex-wrap: wrap; list-style: none; margin: 0; padding: 0; }
+.queuebar li { display: flex; align-items: center; gap: 4px; max-width: 260px; padding: 2px 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); }
+.queuebar li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .queuebar li button { padding: 0 4px; border: 0; background: transparent; color: var(--muted); } .queuebar li button:hover { color: var(--danger); }
+button.small { padding: 2px 8px; font-size: 12px; }
 .composer textarea { flex: 1; resize: none; font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
 iframe { flex: 1; border: none; background: #fff; }
 dialog { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; padding: 0; min-width: 440px; }

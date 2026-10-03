@@ -48,9 +48,17 @@
     <button id="btnDeleteSession" class="ghost danger" title="删除会话">🗑</button>
   </div>
   <div id="messages" class="messages"></div>
+  <div id="queueBar" class="queuebar" hidden>
+    <span class="muted small">排队 <b id="queueCount"></b> 条，本轮结束后自动一起发出</span>
+    <ul id="queueList"></ul>
+    <button type="button" id="queueClear" class="ghost small" title="清空队列">清空</button>
+  </div>
   <form id="composer" class="composer">
-    <textarea id="input" rows="3" placeholder="告诉 AI 你想让这个项目变成什么样…（Enter 发送，Shift+Enter 换行）"></textarea>
-    <button id="send" class="primary">发送</button>
+    <textarea id="input" rows="3" placeholder="告诉 AI 你想让这个项目变成什么样…（Enter 发送，Shift+Enter 换行；处理中：Enter 插话、⌘/Ctrl+Enter 排队、Esc 停止）"></textarea>
+    <div class="composer-btns">
+      <button id="send" class="primary">发送</button>
+      <button type="button" id="queueBtn" class="ghost" hidden title="排队：等本轮结束后再发送 (⌘/Ctrl+Enter)">⏳ 排队</button>
+    </div>
   </form>
   <div id="usage" class="usage" hidden>
     <div class="urow"><span class="ulabel">本会话</span><span id="uSession"></span></div>

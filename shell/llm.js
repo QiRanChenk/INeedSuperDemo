@@ -3,14 +3,20 @@ import { getSettings } from './config.js';
 const IDLE_TIMEOUT = 120_000;   // streaming: abort if no bytes arrive for this long
 const TOTAL_TIMEOUT = 180_000;  // non-streaming: whole request
 
+/** Thrown when the caller aborted the request via `signal` (user pressed stop). */
+export class StoppedError extends Error { constructor() { super('已停止'); this.name = 'StoppedError'; this.stopped = true; } }
+
 /**
  * One chat-completions call against any OpenAI-compatible endpoint.
  * Streams by default (settings.stream !== false); onDelta({ content?, reasoning? }) fires per chunk.
- * Returns { message, usage, ms, ttft } — ms = whole request, ttft = time to first token (streaming only).
+ * Returns { message, usage, ms, ttft, aborted } — ms = whole request, ttft = time to first token (streaming only).
+ * `signal` (optional AbortSignal) lets the caller stop the call: while streaming, the partial message collected so far is
+ * returned with aborted=true; before the first byte a StoppedError is thrown.
  */
-export async function chat({ messages, tools, temperature, settings, onDelta }) {
+export async function chat({ messages, tools, temperature, settings, onDelta, signal }) {
   const s = settings || getSettings();
   if (!s.baseUrl || !s.model) throw new Error('LLM 未配置：请先在设置中填写 Base URL / Model / API Key');
+  if (signal?.aborted) throw new StoppedError();
   const stream = s.stream !== false;
 
   const body = { model: s.model, messages, temperature: temperature ?? s.temperature, stream };
@@ -21,6 +27,8 @@ export async function chat({ messages, tools, temperature, settings, onDelta }) 
   const ctrl = new AbortController();
   let timer = setTimeout(() => ctrl.abort(), stream ? IDLE_TIMEOUT : TOTAL_TIMEOUT);
   const touch = () => { if (stream) { clearTimeout(timer); timer = setTimeout(() => ctrl.abort(), IDLE_TIMEOUT); } };
+  const onStop = () => ctrl.abort();
+  signal?.addEventListener('abort', onStop, { once: true });
   try {
     const res = await fetch(`${s.baseUrl}/chat/completions`, {
       method: 'POST',
@@ -36,23 +44,30 @@ export async function chat({ messages, tools, temperature, settings, onDelta }) 
       if (!msg) throw new Error('LLM 返回无 choices: ' + JSON.stringify(data).slice(0, 200));
       return { message: msg, usage: data.usage || null, ms: Date.now() - t0 };
     }
-    const r = await readStream(res.body, touch, onDelta, t0);
+    const r = await readStream(res.body, touch, onDelta, t0, signal);
     return { ...r, ms: Date.now() - t0 };
   } catch (e) {
-    if (e.name === 'AbortError') throw new Error(stream ? `LLM 流式响应 ${IDLE_TIMEOUT / 1000}s 无数据，已中断` : `LLM 请求超时（${TOTAL_TIMEOUT / 1000}s）`);
+    if (e.name === 'AbortError') {
+      if (signal?.aborted) throw new StoppedError();
+      throw new Error(stream ? `LLM 流式响应 ${IDLE_TIMEOUT / 1000}s 无数据，已中断` : `LLM 请求超时（${TOTAL_TIMEOUT / 1000}s）`);
+    }
     throw e;
-  } finally { clearTimeout(timer); }
+  } finally { clearTimeout(timer); signal?.removeEventListener('abort', onStop); }
 }
 
 function parseJson(text) {
   try { return JSON.parse(text); } catch { throw new Error('LLM 返回非 JSON: ' + text.slice(0, 200)); }
 }
 
-/** Consume an OpenAI-style SSE stream and assemble the final message (content, reasoning_content, tool_calls) + usage. */
-async function readStream(bodyStream, touch, onDelta, t0) {
+/**
+ * Consume an OpenAI-style SSE stream and assemble the final message (content, reasoning_content, tool_calls) + usage.
+ * If `signal` aborts mid-stream, returns what has been collected so far with aborted=true (tool_calls dropped: their
+ * arguments may be truncated JSON).
+ */
+async function readStream(bodyStream, touch, onDelta, t0, signal) {
   const message = { role: 'assistant', content: '' };
   const toolCalls = [];   // by index
-  let usage = null, ttft = null, reasoning = '', finish = null;
+  let usage = null, ttft = null, reasoning = '', finish = null, aborted = false;
   const reader = bodyStream.getReader(), dec = new TextDecoder();
   let buf = '';
   const handle = line => {
@@ -78,20 +93,25 @@ async function readStream(bodyStream, touch, onDelta, t0) {
     }
     if (onDelta && (ev.content || ev.reasoning)) onDelta(ev);
   };
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    touch();
-    buf += dec.decode(value, { stream: true });
-    let idx;
-    while ((idx = buf.indexOf('\n')) >= 0) { handle(buf.slice(0, idx).replace(/\r$/, '')); buf = buf.slice(idx + 1); }
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      touch();
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n')) >= 0) { handle(buf.slice(0, idx).replace(/\r$/, '')); buf = buf.slice(idx + 1); }
+    }
+    if (buf.trim()) handle(buf.trim());
+  } catch (e) {
+    if (e.name !== 'AbortError' || !signal?.aborted) throw e;
+    aborted = true;
   }
-  if (buf.trim()) handle(buf.trim());
   if (reasoning) message.reasoning_content = reasoning;
-  const tcs = toolCalls.filter(Boolean);
+  const tcs = aborted ? [] : toolCalls.filter(Boolean);
   if (tcs.length) { message.tool_calls = tcs.map((t, i) => ({ ...t, id: t.id || `call_${i}` })); }
-  if (!message.content && !tcs.length && !reasoning && !usage) throw new Error('LLM 流式返回为空' + (finish ? `（finish_reason=${finish}）` : ''));
-  return { message, usage, ttft };
+  if (!aborted && !message.content && !tcs.length && !reasoning && !usage) throw new Error('LLM 流式返回为空' + (finish ? `（finish_reason=${finish}）` : ''));
+  return { message, usage, ttft, aborted };
 }
 
 export async function testConnection(settings) {

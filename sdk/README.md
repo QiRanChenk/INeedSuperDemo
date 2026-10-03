@@ -13,10 +13,19 @@ app.listen();                             // 端口取 process.env.PORT
 ctx 提供：`params`、`query`、`body`、`json(data, status)`、`text(s, status)`、`html(s, status)`。
 
 ## LLM：`llm`
-- `await llm.complete(prompt, { system, temperature })` → string
+- `await llm.complete(prompt, { system, temperature, onUsage })` → string
 - `await llm.completeJSON(prompt, opts)` → 解析后的对象
-- `await llm.chat(messages, { tools, temperature })` → assistant message（OpenAI 格式）
+- `await llm.chat(messages, { tools, temperature, maxTokens, signal, onUsage })` → `{ message, usage, ms, model, id, finishReason }`
+  - `message`：assistant message（OpenAI 格式，含 `content` / `tool_calls`），可直接 push 回 messages 继续多轮
+  - `usage`：`{ input, output, cached, total, raw }`（服务端未返回时为 null）；`ms` 为本次耗时
+- `onUsage(usage, result)`：任一调用完成后回调，用于在 complete / completeJSON 中拿到 token 用量
+- `llm.stats()` → 本进程累计 `{ input, output, cached, total, calls, ms }`；`llm.resetStats()` 清零
 - `llm.isConfigured()` → boolean
+```js
+const { message, usage } = await llm.chat([{ role: 'user', content: '你好' }]);
+console.log(message.content, usage?.total);
+let used; const text = await llm.complete('总结这段话', { onUsage: u => { used = u; } });
+```
 配置来自环境变量 `SUPERDEMO_LLM_BASE_URL / SUPERDEMO_LLM_API_KEY / SUPERDEMO_LLM_MODEL`（壳自动注入；独立部署时写 .env 或系统环境）。
 
 ## 数据库：`openDb()`（SQLite，Node 内置 `node:sqlite`，零依赖）
@@ -51,10 +60,10 @@ await datasources.read('db/sales');         // 数据库表
 ## 洞察：`analyze()`
 ```js
 const table = await datasources.read('file/sales.csv');
-const { markdown, profile } = await analyze({
+const { markdown, profile, usage } = await analyze({
   table, question: '哪个地区最值得加大投入？',
   directions: ['growth', 'risk', 'action'],   // 见 DEFAULT_DIRECTIONS，或传 {id,label,hint}
   context: '这是一家饮料公司的季度销售数据',
-});
+});   // usage: 本次 LLM 调用的 token 用量（同 llm.chat）
 ```
 `summarizeTable(table)` 纯 JS 统计画像（行数、列类型、min/max/mean、分组求和、月度趋势），analyze 内部把画像而非原始行喂给 LLM。

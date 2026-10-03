@@ -79,8 +79,9 @@ ${question || '请给出整体分析。'}
 
 # 需要覆盖的建议方向
 ${dirs.map(d => `- ${d.label}：${d.hint}`).join('\n') || '- 综合分析'}`;
-  const markdown = await llm.complete(user, { system, temperature: 0.4 });
-  return { markdown, profile };
+  let usage = null;
+  const markdown = await llm.complete(user, { system, temperature: 0.4, onUsage: u => { usage = u; } });
+  return { markdown, profile, usage };
 }
 
 const round = n => Math.round(n * 100) / 100;
