@@ -137,7 +137,7 @@ async function loadUsage() {
 function renderHeader() {
   const has = !!current, busy = isBusy(current);
   const live = has && (current.status === 'running' || current.status === 'starting');
-  for (const id of ['btnToggle', 'btnLogs', 'btnFiles', 'btnVersions', 'btnExport', 'btnDelete']) $('#' + id).disabled = !has;
+  for (const id of ['btnToggle', 'btnLogs', 'btnFiles', 'btnVersions', 'btnShare', 'btnExport', 'btnDelete']) $('#' + id).disabled = !has;
   $('#btnRestart').disabled = !live;
   $('#btnToggle').textContent = live ? '■ 停止' : '▶ 启动';
   $('#btnToggle').classList.toggle('start', has && !live);
@@ -516,6 +516,51 @@ $('#btnFiles').onclick = async () => {
   $('#dlgPanel').showModal();
 };
 $('#panelClose').onclick = () => $('#dlgPanel').close();
+
+// ---------- share links ----------
+const shareUrl = token => `${location.origin}/s/${token}/`;
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; }
+  catch { // http:// on a LAN address is not a secure context: no Clipboard API
+    const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select(); const ok = document.execCommand('copy'); ta.remove(); return ok;
+  }
+}
+async function openShare() {
+  const id = current.id;
+  $('#shName').textContent = current.name;
+  $('#shHint').textContent = /^(localhost|127\.|\[::1\])/.test(location.hostname) ? '⚠ 你正通过本机地址访问，生成的链接只在这台电脑上能打开；请部署到服务器 / NAS 后再分享。' : '';
+  const list = await api(`/api/projects/${id}/shares`);
+  if (current?.id !== id) return;
+  const ul = $('#shList'); ul.innerHTML = '';
+  if (!list.length) ul.innerHTML = '<li class="muted small">还没有分享链接。</li>';
+  for (const s of list) {
+    const li = document.createElement('li'); li.className = s.active ? '' : 'revoked';
+    const state = s.revoked ? '已关闭' : !s.active ? '已过期' : s.expiresAt ? `有效至 ${new Date(s.expiresAt).toLocaleString()}` : '永久有效';
+    li.innerHTML = `<div class="vmain"><div class="surl"></div><div class="muted small"></div></div>${s.active ? '<button class="ghost copy">复制</button><button class="ghost danger off">关闭</button>' : ''}`;
+    li.querySelector('.surl').textContent = shareUrl(s.token);
+    li.querySelector('.small').textContent = [s.label, state, `打开 ${s.views || 0} 次`, s.lastViewAt ? `最近 ${new Date(s.lastViewAt).toLocaleString()}` : ''].filter(Boolean).join(' · ');
+    if (s.active) {
+      li.querySelector('.copy').onclick = async e => { e.target.textContent = await copyText(shareUrl(s.token)) ? '已复制' : '复制失败'; };
+      li.querySelector('.off').onclick = async () => { if (!confirm('关闭后这个链接立即失效，确定？')) return; await api(`/api/projects/${id}/shares/${s.token}`, { method: 'DELETE' }); openShare(); };
+    }
+    ul.appendChild(li);
+  }
+  if (!$('#dlgShare').open) $('#dlgShare').showModal();
+}
+$('#btnShare').onclick = openShare;
+$('#shClose').onclick = () => $('#dlgShare').close();
+$('#shCreate').onclick = async () => {
+  const btn = $('#shCreate'); btn.disabled = true;
+  try {
+    const s = await api(`/api/projects/${current.id}/shares`, { method: 'POST', body: { days: $('#shDays').value, label: $('#shLabel').value } });
+    $('#shLabel').value = '';
+    const ok = await copyText(shareUrl(s.token));
+    await openShare(); loadProjects();
+    $('#shHint').textContent = ok ? '✓ 新链接已复制到剪贴板' : '链接已生成，请手动复制';
+  } catch (e) { alert('生成失败：' + e.message); }
+  finally { btn.disabled = false; }
+};
 
 // ---------- versions (per-turn snapshots) ----------
 /** End of a turn that changed code: offer a one-click undo right in the conversation. */

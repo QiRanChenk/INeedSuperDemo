@@ -1,9 +1,11 @@
 import http from 'node:http';
 import net from 'node:net';
 import { readProject } from './registry.js';
-import { status } from './runner.js';
+import { status, start } from './runner.js';
+import { resolveShare, recordView } from './shares.js';
 
 const PATH_RE = /^\/p\/([a-z0-9-]+)(\/.*)?$/;
+const SHARE_RE = /^\/s\/([A-Za-z0-9_-]+)(\/.*)?$/;
 
 /**
  * Reverse proxy: /p/:id/<path> -> http://127.0.0.1:<project.port>/<path>
@@ -16,20 +18,41 @@ export function proxyMiddleware(req, res) {
   if (!m) return res.status(404).send('bad proxy path');
   const [, id, rest] = m;
   if (rest === undefined) return res.redirect(302, `/p/${id}/`);
-
   const project = readProject(id);
   if (!project) return res.status(404).send('project not found');
-  const st = status(id).status;
+  forward(req, res, project, rest, { prefix: `/p/${id}`, inject: true });
+}
+
+/**
+ * Share links: /s/:token/<path> -> the shared project. Mounted before the shell's access control. A stopped project is
+ * started on demand (the visitor sees the waiting page meanwhile). No error reporter: visitors cannot post to the shell.
+ */
+export function shareMiddleware(req, res) {
+  const m = req.originalUrl.match(SHARE_RE);
+  const share = m && resolveShare(m[1]);
+  const project = share && readProject(share.projectId);
+  if (!project) return res.status(404).send(messagePage('链接已失效', '这个分享链接不存在、已过期或已被关闭，请向分享者索取新链接。'));
+  if (m[2] === undefined) return res.redirect(302, `/s/${m[1]}/`);
+  const st = status(project.id).status;
+  if (st !== 'running') {
+    if (st !== 'starting') start(project.id).catch(() => {});
+    return res.status(503).send(waitingPage(project, st === 'crashed' ? '暂时无法打开，正在重试…' : '正在启动，请稍候…', true));
+  }
+  forward(req, res, project, m[2], { prefix: `/s/${m[1]}`, inject: false, onPage: () => recordView(share.token) });
+}
+
+function forward(req, res, project, rest, { prefix, inject, onPage }) {
+  const st = status(project.id).status;
   if (st !== 'running' && st !== 'starting') {
     return res.status(503).send(waitingPage(project, st));
   }
-
-  const headers = { ...req.headers, host: `127.0.0.1:${project.port}`, 'x-forwarded-prefix': `/p/${id}` };
+  const headers = { ...req.headers, host: `127.0.0.1:${project.port}`, 'x-forwarded-prefix': prefix };
   delete headers['accept-encoding']; // keep HTML uncompressed so the reporter can be injected
   delete headers.authorization;      // the shell's credentials are not the project's business
   const upstream = http.request({ host: '127.0.0.1', port: project.port, method: req.method, path: rest, headers }, up => {
-    const isHtml = /text\/html/i.test(up.headers['content-type'] || '') && !up.headers['content-encoding'] && req.method === 'GET';
-    if (!isHtml) {
+    const isHtml = /text\/html/i.test(up.headers['content-type'] || '') && req.method === 'GET';
+    if (isHtml && up.statusCode < 400) onPage?.();
+    if (!isHtml || !inject || up.headers['content-encoding']) {
       res.status(up.statusCode);
       for (const [k, v] of Object.entries(up.headers)) if (v !== undefined) res.setHeader(k, v);
       return up.pipe(res);
@@ -37,7 +60,7 @@ export function proxyMiddleware(req, res) {
     const chunks = [];
     up.on('data', c => chunks.push(c));
     up.on('end', () => {
-      const html = injectReporter(Buffer.concat(chunks).toString('utf8'), id);
+      const html = injectReporter(Buffer.concat(chunks).toString('utf8'), project.id);
       res.status(up.statusCode);
       for (const [k, v] of Object.entries(up.headers)) if (v !== undefined && k !== 'content-length') res.setHeader(k, v);
       res.setHeader('content-length', Buffer.byteLength(html));
@@ -52,13 +75,22 @@ export function proxyMiddleware(req, res) {
   req.pipe(upstream);
 }
 
-/** WebSocket (or any HTTP upgrade) passthrough for /p/:id/... — raw TCP splice after replaying the request head. */
-export function proxyUpgrade(req, socket, head) {
-  const m = req.url.match(PATH_RE);
-  const project = m && readProject(m[1]);
+/** Project + upstream path for an upgrade request on /p/:id/… (shell access already checked) or /s/:token/…. */
+export function upgradeTarget(url) {
+  const p = url.match(PATH_RE);
+  if (p) return { project: readProject(p[1]), path: p[2] || '/' };
+  const s = url.match(SHARE_RE);
+  const share = s && resolveShare(s[1]);
+  if (share) return { project: readProject(share.projectId), path: s[2] || '/' };
+  return null;
+}
+
+/** WebSocket (or any HTTP upgrade) passthrough — raw TCP splice after replaying the request head. */
+export function proxyUpgrade(req, socket, head, target = upgradeTarget(req.url)) {
+  const project = target?.project;
   if (!project || status(project.id).status !== 'running') { socket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n'); return; }
   const up = net.connect(project.port, '127.0.0.1', () => {
-    const lines = [`${req.method} ${m[2] || '/'} HTTP/${req.httpVersion}`];
+    const lines = [`${req.method} ${target.path} HTTP/${req.httpVersion}`];
     for (let i = 0; i < req.rawHeaders.length; i += 2) {
       const k = req.rawHeaders[i];
       if (/^host$/i.test(k)) lines.push(`Host: 127.0.0.1:${project.port}`);
@@ -93,11 +125,19 @@ var ce=console.error;console.error=function(){try{s('console',[].map.call(argume
 var f=window.fetch;if(f)window.fetch=function(){var a=arguments;return f.apply(this,a).then(function(r){if(r.status>=500)s('http','请求失败 '+r.status+' '+(a[0]&&a[0].url||a[0]));return r;});};})();`;
 }
 
-function waitingPage(project, st) {
-  return `<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="2">
+/** visitor: share-link wording (no internal status words). */
+function waitingPage(project, st, visitor = false) {
+  return `<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="2"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${escapeHtml(project.name)}</title>
 <body style="font-family:system-ui;background:#0f1117;color:#c9d1d9;display:grid;place-items:center;height:100vh;margin:0">
 <div style="text-align:center"><div style="font-size:40px">⏳</div>
-<p>项目 <b>${escapeHtml(project.name)}</b> 当前状态: ${escapeHtml(st)}</p><p style="color:#8b949e">页面将自动刷新</p></div></body>`;
+<p>${visitor ? `<b>${escapeHtml(project.name)}</b> ${escapeHtml(st)}` : `项目 <b>${escapeHtml(project.name)}</b> 当前状态: ${escapeHtml(st)}`}</p><p style="color:#8b949e">页面将自动刷新</p></div></body>`;
+}
+
+function messagePage(title, text) {
+  return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title>
+<body style="font-family:system-ui;background:#0f1117;color:#c9d1d9;display:grid;place-items:center;height:100vh;margin:0">
+<div style="text-align:center;max-width:420px;padding:24px"><div style="font-size:40px">🔗</div><h2>${escapeHtml(title)}</h2><p style="color:#8b949e">${escapeHtml(text)}</p></div></body>`;
 }
 
 function escapeHtml(s) {

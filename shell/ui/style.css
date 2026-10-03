@@ -144,3 +144,5 @@ body.no-preview { grid-template-columns: var(--sb) 1fr; } body.no-preview #previ
 .vslist .vfiles { font: 11px ui-monospace, Menlo, monospace; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .vslist li.backup { border-style: dashed; }
 .msg.sys .undo { margin-left: 8px; padding: 0 8px; font-size: 12px; }
+.vslist li.revoked { opacity: .5; } .vslist .surl { font: 12px ui-monospace, Menlo, monospace; word-break: break-all; color: var(--brand); }
+#dlgShare label.inline { flex: none; } #dlgShare .row { align-items: flex-end; }

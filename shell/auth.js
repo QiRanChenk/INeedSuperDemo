@@ -46,7 +46,10 @@ export function authMiddleware(req, res, next) {
   const bad = checkRequest(req);
   if (!bad) return next();
   if (bad.status === 401) {
-    res.setHeader('www-authenticate', 'Basic realm="SuperDemo", charset="UTF-8"');
+    // Only page navigations get the login prompt. Background requests (e.g. a shared demo's script hitting a shell
+    // path) get a plain 401, otherwise share-link visitors would see a password dialog pop up.
+    const mode = req.headers['sec-fetch-mode'];
+    if (!mode || mode === 'navigate') res.setHeader('www-authenticate', 'Basic realm="SuperDemo", charset="UTF-8"');
     return setTimeout(() => res.status(401).send(bad.message), 300); // slow down guessing
   }
   res.status(bad.status).send(bad.message);

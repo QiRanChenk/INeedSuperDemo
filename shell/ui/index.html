@@ -36,6 +36,7 @@
       <button id="btnLogs" class="ghost" title="日志">日志</button>
       <button id="btnFiles" class="ghost" title="文件">文件</button>
       <button id="btnVersions" class="ghost" title="每轮对话前自动保存的版本，可一键回滚">版本</button>
+      <button id="btnShare" class="ghost" title="生成分享链接：别人不用口令即可使用这个 Demo">分享</button>
       <button id="btnExport" class="ghost" title="导出 zip / 构建 Docker 镜像">导出</button>
       <button id="btnClear" class="ghost" title="清空对话">清空</button>
       <button id="btnDelete" class="ghost danger" title="删除项目">删除</button>
@@ -168,6 +169,21 @@
         <pre id="exRun" class="cmd"></pre>
       </div>
     </section>
+  </div>
+</dialog>
+
+<!-- share links -->
+<dialog id="dlgShare" class="export-dlg">
+  <div class="dlg wide">
+    <div class="row between"><h3>分享 · <span id="shName"></span></h3><button id="shClose" class="ghost">关闭</button></div>
+    <p class="muted small" style="margin:0">拿到链接的人不需要口令，只能使用这个 Demo（和右侧预览一样），看不到对话、代码、设置和其他项目。注意：Demo 里的数据对访问者可见，也能被修改。</p>
+    <div class="row">
+      <label class="inline">有效期<select id="shDays"><option value="0">永久</option><option value="1">1 天</option><option value="7" selected>7 天</option><option value="30">30 天</option></select></label>
+      <input id="shLabel" maxlength="60" placeholder="备注（可选，如：给张总看）" style="flex:1">
+      <button id="shCreate" class="primary">生成链接</button>
+    </div>
+    <div id="shHint" class="small muted"></div>
+    <ul id="shList" class="vslist"></ul>
   </div>
 </dialog>
 

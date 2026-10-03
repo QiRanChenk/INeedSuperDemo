@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import { ROOT, getSettings, saveSettings, getProjectLlm, maskKey, PRESETS } from './config.js';
 import { PROJECT_TYPES, listProjects, createProject, deleteProject, readProject, writeProject, fileTree, safePath } from './registry.js';
 import * as runner from './runner.js';
-import { proxyMiddleware, proxyUpgrade } from './proxy.js';
+import { proxyMiddleware, proxyUpgrade, shareMiddleware, upgradeTarget } from './proxy.js';
+import { listShares, createShare, revokeShare, deleteSharesOf } from './shares.js';
 import { testConnection } from './llm.js';
 import { runAgent, attachRun, stopRun, interject, listQueue, enqueue, dequeue, clearQueue, isBusy, usageSummary, generateProjectName, getContextInfo } from './agent.js';
 import { summary as usageLogSummary, readLog, backfillIfNeeded } from './usagelog.js';
@@ -17,6 +18,7 @@ import { listSnapshots, restoreSnapshot } from './snapshots.js';
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 
+app.use('/s', shareMiddleware); // share links: public by design, before access control
 app.use(authMiddleware);
 app.use('/p', proxyMiddleware);
 app.use(express.json({ limit: '5mb' }));
@@ -99,6 +101,7 @@ app.get('/api/projects/:id', wrap((req, res) => {
 app.delete('/api/projects/:id', wrap(async (req, res) => {
   await runner.stop(req.params.id);
   deleteProject(req.params.id);
+  deleteSharesOf(req.params.id);
   res.json({ ok: true });
 }));
 const setAutoStart = (id, on) => { const p = readProject(id); if (p && p.autoStart !== on) writeProject({ ...p, autoStart: on }); };
@@ -125,6 +128,18 @@ app.post('/api/projects/:id/client-errors', (req, res) => {
   if (recentWebErrors.size > 500) for (const [k, t] of recentWebErrors) if (now - t > 60_000) recentWebErrors.delete(k);
   runner.log(id, 'web', msg);
 });
+
+// ---- share links ----
+app.get('/api/projects/:id/shares', wrap((req, res) => res.json(listShares(req.params.id))));
+app.post('/api/projects/:id/shares', wrap(async (req, res) => {
+  const id = req.params.id;
+  if (!readProject(id)) return res.status(404).json({ error: 'not found' });
+  const share = createShare(id, req.body || {});
+  setAutoStart(id, true); // a shared demo should stay reachable, also after the shell restarts
+  await runner.start(id);
+  res.json(share);
+}));
+app.delete('/api/projects/:id/shares/:token', wrap((req, res) => res.json(revokeShare(req.params.id, req.params.token))));
 
 // ---- versions (per-turn code snapshots) ----
 app.get('/api/projects/:id/snapshots', wrap((req, res) => res.json(listSnapshots(req.params.id))));
@@ -273,8 +288,9 @@ async function boot() {
     console.log(`  LLM: ${s.baseUrl || '(未配置)'}  model=${s.model || '(未配置)'}  key=${s.apiKey ? maskKey(s.apiKey) : '(未配置)'}`);
     console.log(`  项目: ${projects.length} 个\n`);
   });
-  // WebSocket upgrades for /p/<id>/… go straight to the project (same access control as HTTP)
+  // WebSocket upgrades: /p/<id>/… behind the shell's access control, /s/<token>/… via a live share link
   server.on('upgrade', (req, socket, head) => {
+    if (req.url.startsWith('/s/')) { const t = upgradeTarget(req.url); return t ? proxyUpgrade(req, socket, head, t) : socket.destroy(); }
     const bad = checkRequest(req);
     if (bad) return socket.end(`HTTP/1.1 ${bad.status} ${bad.status === 401 ? 'Unauthorized' : 'Forbidden'}\r\n\r\n`);
     if (req.url.startsWith('/p/')) return proxyUpgrade(req, socket, head);
