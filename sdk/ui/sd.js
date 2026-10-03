@@ -193,7 +193,12 @@
   const tag = (text, type = '') => `<span class="sd-tag ${esc(type)}">${esc(text)}</span>`;
 
   // ---------- charts (SVG, responsive via viewBox) ----------
-  const PALETTE = ['#3b6cf6', '#16a34a', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#64748b', '#f97316'];
+  const BASE = ['#3b6cf6', '#16a34a', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#64748b', '#f97316'];
+  // first colour follows the theme (--sd-brand), so charts match a re-coloured page
+  const PALETTE = new Proxy(BASE, { get(t, k) {
+    if (k === '0') { const b = getComputedStyle(document.documentElement).getPropertyValue('--sd-brand').trim(); return b || t[0]; }
+    return t[k];
+  } });
   /** Axis scale with round ticks: pick the step first (1 / 2 / 2.5 / 5 × 10^n), then the max. */
   function niceScale(v) {
     if (!(v > 0)) return { max: 1, step: 0.25, n: 4 };
