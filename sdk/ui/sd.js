@@ -86,6 +86,8 @@
   /** Field spec: { name, label, type: text|number|email|tel|date|datetime-local|select|textarea|checkbox, options: [v] | [{value,label}], required, placeholder, value, hint, full,
    *  min, max, step, pattern + title (its error message), maxlength, inputmode, autocomplete } */
   function fieldHtml(f) {
+    f = { ...f, label: String(f.label ?? '').replace(/\s*[*＊]+\s*$/, '') }; // required mark comes from the class; drop a typed "*"
+    if (/[*＊]\s*$/.test(String(arguments[0].label ?? '')) && f.required === undefined) f.required = true;
     const id = 'sdf-' + f.name + '-' + Math.random().toString(36).slice(2, 6);
     const req = f.required ? ' required' : '', ph = f.placeholder ? ` placeholder="${esc(f.placeholder)}"` : '';
     const v = f.value ?? '';
