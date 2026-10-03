@@ -167,3 +167,34 @@ body.no-preview { grid-template-columns: var(--sb) 1fr; } body.no-preview #previ
 .row.wrap { flex-wrap: wrap; }
 .sstats { display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 6px; }
 .sbars { display: flex; gap: 2px; align-items: flex-end; height: 32px; } .sbars i { width: 7px; background: var(--brand); border-radius: 2px 2px 0 0; min-height: 1px; opacity: .85; }
+
+/* ---------- phone layout: one pane at a time + bottom tab bar ---------- */
+#mtabs { display: none; }
+@media (max-width: 760px) {
+  body, body.no-preview, body.sb-collapsed { display: block; --sb: 100%; }
+  #sidebar, #chat, #preview { position: fixed; left: 0; right: 0; top: 0; bottom: calc(56px + env(safe-area-inset-bottom)); display: none !important; border-right: 0; }
+  body.m-projects #sidebar, body.m-chat #chat, body.m-preview #preview { display: flex !important; }
+  body.sb-collapsed #sidebar > :not(.brand) { display: revert; } body.sb-collapsed .brand-text { display: inline; }
+  .sb-toggle { display: none; }
+  #mtabs { display: flex; position: fixed; left: 0; right: 0; bottom: 0; height: calc(56px + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom); background: var(--panel); border-top: 1px solid var(--line); z-index: 40; }
+  #mtabs button { flex: 1; border: 0; border-radius: 0; background: none; color: var(--muted); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; font-size: 18px; position: relative; }
+  #mtabs button span { font-size: 11px; }
+  body.m-projects #mtabs [data-t=projects], body.m-chat #mtabs [data-t=chat], body.m-preview #mtabs [data-t=preview] { color: var(--brand); }
+  #mBusy { position: absolute; top: 8px; right: calc(50% - 18px); width: 8px; height: 8px; border-radius: 50%; background: var(--warn); animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: .3; } }
+  /* chat header: name on one line, actions scroll sideways */
+  #chat > header { flex-wrap: wrap; padding: 8px 10px; gap: 6px; min-height: 0; }
+  #chat > header > div:first-child { min-width: 0; flex: 1 1 100%; }
+  #pName { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } #pMeta { display: none; }
+  #chat > header .actions { flex: 1 1 100%; overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; padding-bottom: 2px; } #chat > header .actions::-webkit-scrollbar { display: none; }
+  #chat > header .actions > * { flex: none; }
+  .menu { position: fixed; right: 8px; top: auto; }
+  .sessionbar { padding: 6px 10px; } .sessionbar select { min-width: 0; flex: 1; }
+  #usage { display: none !important; }
+  .composer textarea { font-size: 16px; } /* no iOS zoom on focus */
+  #preview > header { padding: 8px 10px; } #previewUrl { display: none; } #btnDevice { display: none; }
+  #preview.mobile #frame { width: 100%; margin: 0; height: auto; flex: 1; border: 0; border-radius: 0; box-shadow: none; }
+  dialog { min-width: 0; width: calc(100vw - 16px) !important; max-width: none; max-height: calc(100vh - 24px); overflow: auto; }
+  .dlg.wide, .export-dlg .dlg.wide { width: auto; }
+  .row { flex-wrap: wrap; }
+}

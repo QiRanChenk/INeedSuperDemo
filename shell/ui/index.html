@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>SuperDemo 制造器</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E⚡%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="style.css">
@@ -245,6 +245,12 @@
     <pre id="panelBody" class="panel"></pre>
   </div>
 </dialog>
+<!-- phone layout: one pane at a time, switched by this bar (hidden on wide screens) -->
+<nav id="mtabs" aria-label="切换视图">
+  <button data-t="projects">☰<span>项目</span></button>
+  <button data-t="chat">💬<span>对话</span><i id="mBusy" hidden></i></button>
+  <button data-t="preview">👁<span>预览</span></button>
+</nav>
 <script src="usage.js"></script>
 <script src="pagebot.js"></script>
 <script src="app.js"></script>

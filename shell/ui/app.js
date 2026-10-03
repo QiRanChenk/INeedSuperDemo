@@ -37,6 +37,7 @@ async function loadProjects() {
 }
 
 async function select(id) {
+  if (isPhone()) setTab('chat'); // picking a project on a phone goes straight to its conversation
   if (current?.id === id) return;
   current = projects.find(p => p.id === id) || null;
   await loadProjects();
@@ -155,6 +156,7 @@ function renderHeader() {
   sendBtn.title = !busy ? '' : typed ? '插话：当前步骤完成后 AI 会看到这条消息 (Enter)' : '停止本轮处理 (Esc)';
   $('#queueBtn').hidden = !(busy && typed && !isStopping);
   $('#pName').textContent = current ? current.name : '选择或新建一个项目';
+  $('#mBusy').hidden = !busy;
   $('#pMeta').textContent = current ? `${current.typeLabel} · ${current.status} · 端口 ${current.port} · id ${current.id}` : '';
 }
 
@@ -821,6 +823,17 @@ const safeParse = s => { try { return JSON.parse(s); } catch { return {}; } };
 const firstLine = s => String(s ?? '').split('\n')[0].replace(/^\[系统\]\s*/, '↻ ').slice(0, 120);
 
 $('#tokenStats').onclick = () => UsageDialog.open('today');
+
+// ---------- phone layout: bottom tabs switch between projects / chat / preview ----------
+const isPhone = () => matchMedia('(max-width: 760px)').matches;
+function setTab(t) {
+  document.body.classList.remove('m-projects', 'm-chat', 'm-preview');
+  document.body.classList.add('m-' + t);
+  if (t === 'chat') { const box = $('#messages'); box.scrollTop = box.scrollHeight; }
+}
+setTab('projects');
+if (isPhone()) $('#input').placeholder = '告诉 AI 你想怎么改…（处理中可直接插话）';
+for (const b of document.querySelectorAll('#mtabs button')) b.onclick = () => setTab(b.dataset.t);
 
 // ---------- sidebar collapse ----------
 function setSidebar(collapsed) {
