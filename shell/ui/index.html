@@ -209,6 +209,15 @@
     <div id="shHint" class="small muted"></div>
     <ul id="shList" class="vslist"></ul>
     <section class="excard">
+      <h4>访客导览</h4>
+      <div class="muted small">别人第一次打开分享链接时，左下角显示「怎么体验」小卡片。每行一步，可写成「步骤说明 | 页面文件」让这一步直接跳到对应页面。</div>
+      <input id="tourTitle" maxlength="40" placeholder="卡片标题，如：3 步体验库存预警">
+      <input id="tourIntro" maxlength="160" placeholder="一句话说明（可选）">
+      <textarea id="tourSteps" rows="4" placeholder="在「库存总览」看哪些商品标红 | dashboard.html&#10;点「生成补货建议」看 AI 给的数量和理由 | suggestions.html"></textarea>
+      <div class="row wrap"><label class="check"><input type="checkbox" id="tourOn"> 显示导览</label><span style="flex:1"></span><button id="tourGen" class="ghost">✨ AI 生成</button><button id="tourSave" class="ghost">保存</button></div>
+      <div id="tourInfo" class="small muted"></div>
+    </section>
+    <section class="excard">
       <h4>演示数据</h4>
       <div class="muted small">访客能修改 Demo 里的数据。先把整理好的数据保存为「演示初始状态」，被改乱后一键恢复，或每天凌晨自动恢复。</div>
       <div class="row wrap"><button id="ddSave" class="ghost">保存当前数据为演示数据</button><button id="ddRestore" class="ghost">恢复演示数据</button>

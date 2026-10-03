@@ -198,3 +198,4 @@ body.no-preview { grid-template-columns: var(--sb) 1fr; } body.no-preview #previ
   .dlg.wide, .export-dlg .dlg.wide { width: auto; }
   .row { flex-wrap: wrap; }
 }
+.excard input, .excard textarea { font: inherit; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); width: 100%; }

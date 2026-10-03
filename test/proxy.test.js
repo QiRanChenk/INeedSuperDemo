@@ -13,3 +13,12 @@ test('pages without <head> still get the reporter', () => {
   assert.match(injectReporter('<!DOCTYPE html><p>x', 'a'), /^<!DOCTYPE html><script>/);
   assert.match(injectReporter('<p>x', 'a'), /^<script>/);
 });
+
+test('tour: steps keep relative pages only; visitor script escapes text and parses', async () => {
+  const { normalizeTour, tourScript } = await import('../shell/tour.js');
+  const t = normalizeTour({ title: '体验', steps: [{ text: '看看', page: 'https://evil.example/x' }, { text: '<img onerror=1>', page: '/dashboard.html' }, 'x'] });
+  assert.deepEqual(t.steps.map(s => s.page), ['', 'dashboard.html', '']);
+  const js = tourScript(t, 'T'.repeat(20));
+  assert.doesNotThrow(() => new Function(js));
+  assert.ok(!js.includes('<img'));
+});

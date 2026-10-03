@@ -5,6 +5,7 @@ import { status, start } from './runner.js';
 import crypto from 'node:crypto';
 import { resolveShare, recordView } from './shares.js';
 import { addFeedback } from './feedback.js';
+import { getTour, tourScript } from './tour.js';
 
 const PATH_RE = /^\/p\/([a-z0-9-]+)(\/.*)?$/;
 const SHARE_RE = /^\/s\/([A-Za-z0-9_-]+)(\/.*)?$/;
@@ -47,13 +48,26 @@ export function shareMiddleware(req, res) {
   const visitor = existing || crypto.randomBytes(9).toString('base64url');
   forward(req, res, project, m[2], {
     prefix: `/s/${m[1]}`,
-    inject: share.feedback !== false ? html => injectFeedback(html, m[1]) : false,
+    inject: visitorInjection(share, m[1]),
     onPage: () => {
       recordView(share.token, visitor, m[2].split('?')[0]);
       if (!existing) res.appendHeader('set-cookie', `${cookieName}=${visitor}; Path=/s/${m[1]}/; Max-Age=31536000; SameSite=Lax; HttpOnly`);
     },
   });
 }
+
+/** Scripts for share-link visitors: feedback button and (optional) demo tour card. false = page untouched. */
+function visitorInjection(share, token) {
+  const tour = getTour(share.projectId);
+  const withTour = tour?.enabled && tour.steps.length;
+  if (share.feedback === false && !withTour) return false;
+  return html => {
+    let out = share.feedback !== false ? injectFeedback(html, token) : html;
+    if (withTour) out = appendScript(out, tourScript(tour, token));
+    return out;
+  };
+}
+const appendScript = (html, js) => { const i = html.search(/<\/body>/i), tag = `<script>${js}</script>`; return i >= 0 ? html.slice(0, i) + tag + html.slice(i) : html + tag; };
 
 // visitor feedback: POST /s/<token>/__sd/feedback { text, name, page, viewport }; at most 30 per link per hour
 const feedbackRate = new Map();

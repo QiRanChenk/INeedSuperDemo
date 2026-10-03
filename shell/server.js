@@ -5,6 +5,7 @@ import { ROOT, getSettings, saveSettings, getProjectLlm, maskKey, PRESETS } from
 import { PROJECT_TYPES, SKELETONS, skeletonAvailable, listProjects, createProject, duplicateProject, deleteProject, readProject, writeProject, fileTree, safePath } from './registry.js';
 import { listFeedback, countNew, updateFeedback, deleteFeedback, feedbackToMessage } from './feedback.js';
 import { demoDataInfo, saveDemoData, restoreDemoData, setDailyReset, runDailyResets } from './demodata.js';
+import { getTour, saveTour, generateTour } from './tour.js';
 import { makePlan, normalizePlan, planToMessage } from './planner.js';
 import * as runner from './runner.js';
 import { proxyMiddleware, proxyUpgrade, shareMiddleware, upgradeTarget } from './proxy.js';
@@ -174,6 +175,11 @@ app.post('/api/projects/:id/feedback/message', wrap((req, res) => {
   if (!items.length) return res.status(400).json({ error: '请先选择反馈' });
   res.json({ message: feedbackToMessage(items) });
 }));
+
+// ---- visitor tour (shown on share links) ----
+app.get('/api/projects/:id/tour', wrap((req, res) => res.json(getTour(req.params.id) || { enabled: false, title: '', intro: '', steps: [] })));
+app.put('/api/projects/:id/tour', wrap((req, res) => res.json(saveTour(req.params.id, req.body || {}))));
+app.post('/api/projects/:id/tour/generate', wrap(async (req, res) => res.json(await generateTour(req.params.id))));
 
 // ---- demo data snapshot ----
 app.get('/api/projects/:id/demo-data', wrap((req, res) => res.json(demoDataInfo(req.params.id))));

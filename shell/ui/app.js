@@ -643,7 +643,7 @@ async function openShare() {
     }
     ul.appendChild(li);
   }
-  loadDemoData();
+  loadDemoData(); loadTour();
   if (!$('#dlgShare').open) $('#dlgShare').showModal();
 }
 $('#btnShare').onclick = openShare;
@@ -705,6 +705,23 @@ $('#fbSend').onclick = async () => {
   $('#dlgFeedback').close(); loadProjects();
   isBusy(current) ? enqueue(message) : send(message); // busy: queued as the next turn
 };
+
+// ---------- visitor tour (in the share dialog) ----------
+function renderTour(t) {
+  $('#tourTitle').value = t.title || ''; $('#tourIntro').value = t.intro || '';
+  $('#tourSteps').value = (t.steps || []).map(s => s.page ? `${s.text} | ${s.page}` : s.text).join('\n');
+  $('#tourOn').checked = !!t.enabled && !!t.steps?.length;
+}
+const readTour = () => ({ enabled: $('#tourOn').checked, title: $('#tourTitle').value, intro: $('#tourIntro').value,
+  steps: $('#tourSteps').value.split('\n').map(l => l.trim()).filter(Boolean).map(l => { const [text, page = ''] = l.split('|').map(x => x.trim()); return { text, page }; }) });
+async function loadTour() { try { renderTour(await api(`/api/projects/${current.id}/tour`)); $('#tourInfo').textContent = ''; } catch {} }
+$('#tourGen').onclick = async () => {
+  const b = $('#tourGen'); b.disabled = true; $('#tourInfo').textContent = 'AI 正在根据方案和页面写导览…';
+  try { renderTour(await api(`/api/projects/${current.id}/tour/generate`, { method: 'POST' })); $('#tourInfo').textContent = '✓ 已生成并启用，访客下次打开链接就能看到'; }
+  catch (e) { $('#tourInfo').textContent = '✗ ' + e.message; } finally { b.disabled = false; }
+};
+$('#tourSave').onclick = async () => { try { renderTour(await api(`/api/projects/${current.id}/tour`, { method: 'PUT', body: readTour() })); $('#tourInfo').textContent = '✓ 已保存'; } catch (e) { $('#tourInfo').textContent = '✗ ' + e.message; } };
+$('#tourOn').onchange = () => $('#tourSave').click();
 
 // ---------- demo data (in the share dialog) ----------
 function renderDemoData(d) {
