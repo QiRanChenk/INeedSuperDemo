@@ -137,7 +137,7 @@ async function loadUsage() {
 function renderHeader() {
   const has = !!current, busy = isBusy(current);
   const live = has && (current.status === 'running' || current.status === 'starting');
-  for (const id of ['btnToggle', 'btnLogs', 'btnFiles', 'btnExport', 'btnDelete']) $('#' + id).disabled = !has;
+  for (const id of ['btnToggle', 'btnLogs', 'btnFiles', 'btnVersions', 'btnExport', 'btnDelete']) $('#' + id).disabled = !has;
   $('#btnRestart').disabled = !live;
   $('#btnToggle').textContent = live ? '■ 停止' : '▶ 启动';
   $('#btnToggle').classList.toggle('start', has && !live);
@@ -194,7 +194,10 @@ function addSys(pid, text) { return addMsg(pid, 'sys', text); }
 function addInterjection(pid, text) { const d = addMsg(pid, 'user', text); d.classList.add('interjection'); d.title = '插话（在 AI 处理过程中补充）'; return d; }
 function addTool(pid, name, args) {
   const d = document.createElement('div'); d.className = 'tool';
-  const a = args && (args.path || args.command || (args.lines ? `${args.lines} lines` : ''));
+  const a = !args ? '' : name === 'http_request' ? `${args.method || 'GET'} ${args.path || ''}`
+    : name === 'grep' ? `/${args.pattern || ''}/ ${args.path || ''}`
+    : name === 'read_file' && args.offset ? `${args.path} :${args.offset}${args.limit ? '+' + args.limit : ''}`
+    : args.path || args.command || (args.lines ? `${args.lines} lines` : '');
   d.innerHTML = `<b>${esc(name)}</b> ${esc(typeof a === 'string' ? a : JSON.stringify(a))}`;
   return append(pid, d);
 }
@@ -378,6 +381,8 @@ function handleEvent(pid, ev) {
     case 'tool_result': addToolResult(pid, ev.name, ev.preview); break;
     case 'restarting': addSys(pid, '↻ 文件已修改，重启项目…'); break;
     case 'restarted': addSys(pid, ev.status === 'running' ? '✓ 项目已重启' : '✗ 重启后状态: ' + ev.status); if (ev.status === 'running' && sameProject(pid)) setTimeout(reloadFrame, 400); break;
+    case 'snapshot': addUndo(pid, ev); break;
+    case 'web_errors': addSys(pid, `⚠ 预览页面报告了 ${ev.count} 个前端错误，已交给 AI 处理`); break;
     case 'done': finishText(pid, ev.content); if (ev.stopped) addSys(pid, '■ 已停止'); if (sameProject(pid)) reloadFrame(); break;
     case 'error': addMsg(pid, 'error', ev.message); break;
   }
@@ -511,6 +516,45 @@ $('#btnFiles').onclick = async () => {
   $('#dlgPanel').showModal();
 };
 $('#panelClose').onclick = () => $('#dlgPanel').close();
+
+// ---------- versions (per-turn snapshots) ----------
+/** End of a turn that changed code: offer a one-click undo right in the conversation. */
+function addUndo(pid, ev) {
+  const d = addSys(pid, `✓ 已保存本轮之前的版本（本轮改动 ${ev.changedCount} 个文件）`);
+  const b = document.createElement('button'); b.type = 'button'; b.className = 'ghost undo'; b.textContent = '撤销本轮';
+  b.onclick = () => restoreVersion(pid.split(':')[0], ev.id);
+  d.appendChild(b);
+}
+async function restoreVersion(projectId, vid, label) {
+  if (!confirm(`把代码回滚到${label ? `「${label}」` : '本轮'}开始前的版本？\n业务数据不受影响；回滚前的状态会另存为一个版本，可再切回。`)) return false;
+  try {
+    const r = await api(`/api/projects/${projectId}/snapshots/${vid}/restore`, { method: 'POST' });
+    if (current?.id === projectId) { await loadHistory(); reloadFrame(); }
+    loadProjects();
+    if (r.status !== 'running') alert('已回滚，但项目启动状态为 ' + r.status + '，可查看日志');
+    return true;
+  } catch (e) { alert('回滚失败：' + e.message); return false; }
+}
+async function openVersions() {
+  const id = current.id;
+  $('#vsName').textContent = current.name;
+  const list = await api(`/api/projects/${id}/snapshots`);
+  const ul = $('#vsList'); ul.innerHTML = '';
+  if (!list.length) ul.innerHTML = '<li class="muted small">还没有版本。AI 每次修改代码前会自动保存。</li>';
+  for (const v of list) {
+    const li = document.createElement('li'); li.className = v.kind;
+    const files = v.changed?.length ? `本轮改动: ${v.changed.slice(0, 6).join(', ')}${v.changedCount > 6 ? ` 等 ${v.changedCount} 个` : ''}` : v.kind === 'backup' ? '回滚前的完整代码' : '';
+    li.innerHTML = `<div class="vmain"><div class="vlabel"></div><div class="muted small">${esc(new Date(v.ts).toLocaleString())} · ${v.files} 个文件</div><div class="vfiles"></div></div><button class="ghost">回滚到此前</button>`;
+    li.querySelector('.vlabel').textContent = v.kind === 'backup' ? '↺ ' + v.label : v.label || '（无描述）';
+    li.querySelector('.vfiles').textContent = files; li.querySelector('.vfiles').title = (v.changed || []).join('\n');
+    li.querySelector('button').title = v.kind === 'backup' ? '恢复到那次回滚之前的代码' : '恢复到这一轮对话开始前的代码';
+    li.querySelector('button').onclick = async () => { if (isBusy(current)) return alert('AI 正在处理，请先停止或等待完成'); if (await restoreVersion(id, v.id, v.label)) openVersions(); };
+    ul.appendChild(li);
+  }
+  if (!$('#dlgVersions').open) $('#dlgVersions').showModal();
+}
+$('#btnVersions').onclick = openVersions;
+$('#vsClose').onclick = () => $('#dlgVersions').close();
 
 // ---------- export / deploy ----------
 const fmtBytes = n => n >= 1e9 ? (n / 1e9).toFixed(2) + ' GB' : n >= 1e6 ? (n / 1e6).toFixed(0) + ' MB' : (n / 1e3).toFixed(0) + ' KB';

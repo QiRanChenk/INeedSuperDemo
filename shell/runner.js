@@ -1,24 +1,45 @@
 import { spawn } from 'node:child_process';
 import net from 'node:net';
 import path from 'node:path';
+import fs from 'node:fs';
 import { getProjectLlm } from './config.js';
 import { projectDir, readProject, syncSdk } from './registry.js';
 
-const procs = new Map(); // id -> { proc, status, logs, startedAt }
+const procs = new Map(); // id -> { proc, status, logs, startedAt, want, crashes }
 const LOG_LIMIT = 500;
+const LOG_FILE_MAX = 512 * 1024;
+const CRASH_WINDOW = 60_000, MAX_AUTO_RESTARTS = 3;
+
+// Logs are mirrored to .superdemo/run.log (JSON lines, one rotation) so they survive a shell restart.
+const logFile = id => path.join(projectDir(id), '.superdemo', 'run.log');
+function loadLogs(id) {
+  try {
+    return fs.readFileSync(logFile(id), 'utf8').split('\n').slice(-LOG_LIMIT - 1)
+      .map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  } catch { return []; }
+}
 
 function entry(id) {
-  if (!procs.has(id)) procs.set(id, { proc: null, status: 'stopped', logs: [], startedAt: null });
+  if (!procs.has(id)) procs.set(id, { proc: null, status: 'stopped', logs: loadLogs(id), startedAt: null, want: false, crashes: [] });
   return procs.get(id);
 }
 
-function log(id, stream, text) {
+/** Append log lines. stream: out | err | sys | web (browser errors reported by the preview page). */
+export function log(id, stream, text) {
   const e = entry(id);
+  const added = [];
   for (const line of String(text).split('\n')) {
     if (!line) continue;
-    e.logs.push({ t: Date.now(), stream, line });
+    const l = { t: Date.now(), stream, line };
+    e.logs.push(l); added.push(l);
   }
   if (e.logs.length > LOG_LIMIT) e.logs.splice(0, e.logs.length - LOG_LIMIT);
+  if (!added.length) return;
+  try {
+    const f = logFile(id);
+    if (fs.existsSync(f) && fs.statSync(f).size > LOG_FILE_MAX) fs.renameSync(f, f + '.1');
+    fs.appendFileSync(f, added.map(l => JSON.stringify(l)).join('\n') + '\n');
+  } catch {}
 }
 
 export function status(id) {
@@ -33,6 +54,7 @@ export function projectEnv(project) {
   return {
     ...process.env,
     PORT: String(project.port),
+    HOST: '127.0.0.1', // only reachable through the shell proxy (which enforces the shell's access control)
     SUPERDEMO_PROJECT_ID: project.id,
     SUPERDEMO_PROJECT_NAME: project.name,
     SUPERDEMO_LLM_BASE_URL: llm.baseUrl,
@@ -45,6 +67,7 @@ export async function start(id) {
   const project = readProject(id);
   if (!project) throw new Error('project not found');
   const e = entry(id);
+  e.want = true;
   if (e.proc) return status(id);
 
   const cwd = projectDir(id);
@@ -63,7 +86,11 @@ export async function start(id) {
   proc.stderr.on('data', d => log(id, 'err', d));
   proc.on('exit', (code, sig) => {
     log(id, 'sys', `[shell] exited code=${code} signal=${sig ?? ''}`);
-    if (e.proc === proc) { e.proc = null; e.status = code === 0 || sig ? 'stopped' : 'crashed'; }
+    if (e.proc !== proc) return;
+    const wasRunning = e.status === 'running';
+    // killed by a signal we did not send (OOM killer, kill -9) counts as a crash; stop() clears `want` first
+    e.proc = null; e.status = code === 0 || (sig && !e.want) ? 'stopped' : 'crashed';
+    if (e.status === 'crashed' && wasRunning && e.want) autoRestart(id, e);
   });
 
   const ok = await waitForPort(project.port, 8000, () => e.proc !== proc);
@@ -72,8 +99,20 @@ export async function start(id) {
   return status(id);
 }
 
+/** A project that crashed after a successful start is brought back, at most MAX_AUTO_RESTARTS times per minute. */
+function autoRestart(id, e) {
+  const now = Date.now();
+  e.crashes = e.crashes.filter(t => now - t < CRASH_WINDOW);
+  if (e.crashes.length >= MAX_AUTO_RESTARTS) { log(id, 'sys', `[shell] crashed ${e.crashes.length + 1} times within a minute, not restarting automatically`); return; }
+  e.crashes.push(now);
+  const delay = 1000 * e.crashes.length;
+  log(id, 'sys', `[shell] crashed, restarting in ${delay / 1000}s`);
+  setTimeout(() => { if (e.want && !e.proc) start(id).catch(err => log(id, 'sys', '[shell] auto restart failed: ' + err.message)); }, delay);
+}
+
 export function stop(id) {
   const e = entry(id);
+  e.want = false;
   const proc = e.proc;
   if (!proc) { e.status = 'stopped'; return Promise.resolve(status(id)); }
   return new Promise(resolve => {

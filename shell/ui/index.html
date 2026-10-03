@@ -35,6 +35,7 @@
       <button id="btnRestart" class="ghost" title="重启">↻</button>
       <button id="btnLogs" class="ghost" title="日志">日志</button>
       <button id="btnFiles" class="ghost" title="文件">文件</button>
+      <button id="btnVersions" class="ghost" title="每轮对话前自动保存的版本，可一键回滚">版本</button>
       <button id="btnExport" class="ghost" title="导出 zip / 构建 Docker 镜像">导出</button>
       <button id="btnClear" class="ghost" title="清空对话">清空</button>
       <button id="btnDelete" class="ghost danger" title="删除项目">删除</button>
@@ -167,6 +168,15 @@
         <pre id="exRun" class="cmd"></pre>
       </div>
     </section>
+  </div>
+</dialog>
+
+<!-- versions: per-turn code snapshots -->
+<dialog id="dlgVersions" class="export-dlg">
+  <div class="dlg wide">
+    <div class="row between"><h3>版本 · <span id="vsName"></span></h3><button id="vsClose" class="ghost">关闭</button></div>
+    <p class="muted small" style="margin:0">每轮对话开始前会自动保存一次代码。回滚只恢复代码，<b>不影响已录入的业务数据</b>；回滚前的状态也会另存一个版本，可随时再切回来。</p>
+    <ul id="vsList" class="vslist"></ul>
   </div>
 </dialog>
 

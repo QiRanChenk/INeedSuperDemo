@@ -55,7 +55,7 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
 .dlg input, .dlg select, .dlg textarea { font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
 .row { display: flex; gap: 10px; align-items: center; } .row.end { justify-content: flex-end; } .row.between { justify-content: space-between; }
 .panel { max-height: 70vh; overflow: auto; margin: 0; font: 12px/1.5 ui-monospace, Menlo, monospace; background: var(--bg); padding: 12px; border-radius: 8px; white-space: pre-wrap; }
-.panel .err { color: #ffb4ae; } .panel .sys { color: var(--muted); } .panel .ok { color: var(--ok); }
+.panel .err { color: #ffb4ae; } .panel .web { color: var(--warn); } .panel .sys { color: var(--muted); } .panel .ok { color: var(--ok); }
 .panel a { color: var(--brand); cursor: pointer; text-decoration: none; }
 .thinking { display: inline-block; animation: pulse 1.2s infinite; } @keyframes pulse { 50% { opacity: .4; } }
 
@@ -136,3 +136,11 @@ body.no-preview { grid-template-columns: var(--sb) 1fr; } body.no-preview #previ
 .cmd { margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--bg); font: 12px/1.6 ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-all; color: var(--ink); }
 .exlog { max-height: 260px; } .excard code { font: 12px ui-monospace, Menlo, monospace; background: var(--bg); padding: 1px 5px; border-radius: 4px; }
 #exDockerStatus.ok { color: var(--ok); } #exDockerStatus.bad { color: var(--danger); }
+
+/* versions dialog */
+.vslist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow: auto; }
+.vslist li { display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.vslist .vmain { flex: 1; min-width: 0; } .vslist .vlabel { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.vslist .vfiles { font: 11px ui-monospace, Menlo, monospace; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.vslist li.backup { border-style: dashed; }
+.msg.sys .undo { margin-left: 8px; padding: 0 8px; font-size: 12px; }

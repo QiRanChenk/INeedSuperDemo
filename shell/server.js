@@ -4,17 +4,20 @@ import fs from 'node:fs';
 import { ROOT, getSettings, saveSettings, getProjectLlm, maskKey, PRESETS } from './config.js';
 import { PROJECT_TYPES, listProjects, createProject, deleteProject, readProject, writeProject, fileTree, safePath } from './registry.js';
 import * as runner from './runner.js';
-import { proxyMiddleware } from './proxy.js';
+import { proxyMiddleware, proxyUpgrade } from './proxy.js';
 import { testConnection } from './llm.js';
 import { runAgent, attachRun, stopRun, interject, listQueue, enqueue, dequeue, clearQueue, isBusy, usageSummary, generateProjectName, getContextInfo } from './agent.js';
 import { summary as usageLogSummary, readLog, backfillIfNeeded } from './usagelog.js';
-import { listSessions, createSession, renameSession, deleteSession, setCurrentSession, loadHistory, clearHistory, lastChatAt } from './sessions.js';
+import { listSessions, createSession, renameSession, deleteSession, setCurrentSession, loadHistory, clearHistory, lastChatAt, appendHistory } from './sessions.js';
 import { zipProject, dockerInfo, imageInfo, buildImage, isBuilding, saveImage, runHints } from './export.js';
 import zlib from 'node:zlib';
+import { authMiddleware, checkRequest, startupProblem, HOST, isLoopbackHost, passwordEnabled } from './auth.js';
+import { listSnapshots, restoreSnapshot } from './snapshots.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 
+app.use(authMiddleware);
 app.use('/p', proxyMiddleware);
 app.use(express.json({ limit: '5mb' }));
 app.use(express.static(path.join(ROOT, 'shell', 'ui')));
@@ -82,7 +85,7 @@ app.post('/api/projects', wrap(async (req, res) => {
   body.description = String(body.description || '').trim();
   if (!body.description) return res.status(400).json({ error: '请填写「你想做什么」' });
   body.name = String(body.name || '').trim() || await generateProjectName(body.description);
-  const p = createProject(body);
+  const p = await createProject(body);
   await runner.start(p.id);
   res.json(withStatus(p));
 }));
@@ -105,6 +108,33 @@ app.get('/api/projects/:id/files', wrap((req, res) => res.json(fileTree(req.para
 app.get('/api/projects/:id/file', wrap((req, res) => {
   const abs = safePath(req.params.id, String(req.query.path || ''));
   res.type('text/plain').send(fs.readFileSync(abs, 'utf8'));
+}));
+
+// ---- front-end errors reported by the preview page (script injected by the proxy) ----
+const recentWebErrors = new Map(); // `${id}\n${message}` -> ts, to drop repeats
+app.post('/api/projects/:id/client-errors', (req, res) => {
+  const id = req.params.id, b = req.body || {};
+  res.status(204).end();
+  if (!readProject(id)) return;
+  const msg = `[${String(b.kind || 'error').slice(0, 20)}] ${String(b.message || '').slice(0, 1500).replace(/\s*\n\s*/g, ' ⏎ ')}${b.page && b.page !== '/' ? ` (页面 ${String(b.page).slice(0, 200)})` : ''}`;
+  const key = id + '\n' + msg, now = Date.now();
+  if (now - (recentWebErrors.get(key) || 0) < 10_000) return;
+  recentWebErrors.set(key, now);
+  if (recentWebErrors.size > 500) for (const [k, t] of recentWebErrors) if (now - t > 60_000) recentWebErrors.delete(k);
+  runner.log(id, 'web', msg);
+});
+
+// ---- versions (per-turn code snapshots) ----
+app.get('/api/projects/:id/snapshots', wrap((req, res) => res.json(listSnapshots(req.params.id))));
+app.post('/api/projects/:id/snapshots/:sid/restore', wrap(async (req, res) => {
+  const id = req.params.id;
+  if (isBusy(id)) return res.status(409).json({ error: 'AI 正在处理，请先停止或等待完成' });
+  const r = restoreSnapshot(id, req.params.sid);
+  const when = new Date(r.restored.ts).toLocaleString('zh-CN', { hour12: false });
+  appendHistory(id, undefined, { role: 'user', system: true, ts: Date.now(),
+    content: `[系统] 用户已把项目代码回滚到「${r.restored.label || when}」这一轮开始前的版本（${when}）；业务数据未变。此前读到的文件内容可能已过期，修改前请重新读取。` });
+  const st = await runner.restart(id);
+  res.json({ ...r, status: st.status });
 }));
 
 // ---- export / deploy ----
@@ -230,14 +260,23 @@ function sse(res) {
 
 // ---- boot ----
 async function boot() {
+  const problem = startupProblem();
+  if (problem) { console.error('\n  ✗ ' + problem.replace(/\n/g, '\n    ') + '\n'); process.exit(1); }
   const n = backfillIfNeeded(); if (n) console.log(`[boot] token usage log backfilled: ${n} entries`);
   const projects = listProjects();
   for (const p of projects) if (p.autoStart !== false) runner.start(p.id).catch(e => console.error(`[boot] ${p.id}:`, e.message));
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, HOST, () => {
     const s = getSettings();
-    console.log(`\n  SuperDemo 壳已启动:  http://localhost:${PORT}`);
+    console.log(`\n  SuperDemo 壳已启动:  http://${isLoopbackHost(HOST) ? 'localhost' : HOST}:${PORT}${passwordEnabled() ? '  (已启用访问口令)' : ''}`);
     console.log(`  LLM: ${s.baseUrl || '(未配置)'}  model=${s.model || '(未配置)'}  key=${s.apiKey ? maskKey(s.apiKey) : '(未配置)'}`);
     console.log(`  项目: ${projects.length} 个\n`);
+  });
+  // WebSocket upgrades for /p/<id>/… go straight to the project (same access control as HTTP)
+  server.on('upgrade', (req, socket, head) => {
+    const bad = checkRequest(req);
+    if (bad) return socket.end(`HTTP/1.1 ${bad.status} ${bad.status === 401 ? 'Unauthorized' : 'Forbidden'}\r\n\r\n`);
+    if (req.url.startsWith('/p/')) return proxyUpgrade(req, socket, head);
+    socket.destroy();
   });
 }
 

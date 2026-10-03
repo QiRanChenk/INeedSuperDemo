@@ -6,12 +6,13 @@
   "private": true,
   "scripts": {
     "start": "node shell/server.js",
-    "dev": "node --watch-path=shell shell/server.js"
+    "dev": "node --watch-path=shell shell/server.js",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "express": "^4.19.2"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22.13"
   }
 }

@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import net from 'node:net';
 import { PROJECTS_DIR, TEMPLATES_DIR, SDK_DIR } from './config.js';
 
 export const PROJECT_TYPES = {
@@ -40,20 +41,27 @@ function slugify(name) {
   return s.length >= 2 ? s : 'p' + Date.now().toString(36).slice(-5);
 }
 
-function nextPort() {
+/** First port >= BASE_PORT not assigned to a project and not taken by another process on this machine. */
+async function nextPort() {
   const used = new Set(listProjects().map(p => p.port));
-  let port = BASE_PORT;
-  while (used.has(port)) port++;
-  return port;
+  for (let port = BASE_PORT; port < BASE_PORT + 1000; port++) if (!used.has(port) && await portFree(port)) return port;
+  throw new Error('no free port');
+}
+export function portFree(port) {
+  return new Promise(resolve => {
+    const srv = net.createServer().once('error', () => resolve(false)).once('listening', () => srv.close(() => resolve(true)));
+    srv.listen(port, '127.0.0.1');
+  });
 }
 
-export function createProject({ name, description = '', type = 'web' }) {
+export async function createProject({ name, description = '', type = 'web' }) {
   if (!description || !description.trim()) throw new Error('请填写「你想做什么」');
   if (!name || !name.trim()) throw new Error('name required (generate it first)');
   const def = PROJECT_TYPES[type];
   if (!def) throw new Error('unknown project type: ' + type);
   if (!def.template) throw new Error(`${def.label} 尚未实现`);
 
+  const port = await nextPort();
   let id = slugify(name);
   if (fs.existsSync(path.join(PROJECTS_DIR, id))) id += '-' + Math.random().toString(36).slice(2, 6);
   const dir = projectDir(id);
@@ -69,7 +77,7 @@ export function createProject({ name, description = '', type = 'web' }) {
     type,
     template: def.template,
     entry: 'server.js',
-    port: nextPort(),
+    port,
     autoStart: true,
     createdAt: new Date().toISOString(),
   };

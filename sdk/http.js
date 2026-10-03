@@ -53,7 +53,8 @@ export function createApp() {
     },
     listen(port = Number(process.env.PORT) || 3000, cb) {
       const server = http.createServer((req, res) => app.handle(req, res));
-      server.listen(port, '0.0.0.0', () => { console.log(`listening on http://localhost:${port}`); cb?.(server); });
+      // HOST: the SuperDemo shell sets 127.0.0.1 (reached via its proxy); standalone / Docker default to all interfaces
+      server.listen(port, process.env.HOST || '0.0.0.0', () => { console.log(`listening on http://localhost:${port}`); cb?.(server); });
       return server;
     },
   };

@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR, PROJECTS_DIR } from './config.js';
+import { parseHistory } from './sessions.js';
 
 const LOG = path.join(DATA_DIR, 'usage-log.jsonl');
 
@@ -42,11 +43,11 @@ export function backfillIfNeeded() {
     const meta = path.join(PROJECTS_DIR, pid, '.superdemo');
     const files = [];
     const sdir = path.join(meta, 'sessions');
-    if (fs.existsSync(sdir)) for (const f of fs.readdirSync(sdir)) if (f.endsWith('.json')) files.push([f.replace(/\.json$/, ''), path.join(sdir, f)]);
+    if (fs.existsSync(sdir)) for (const f of fs.readdirSync(sdir)) if (/\.jsonl?$/.test(f)) files.push([f.replace(/\.jsonl?$/, ''), path.join(sdir, f)]);
     if (fs.existsSync(path.join(meta, 'history.json'))) files.push(['default', path.join(meta, 'history.json')]);
     for (const [sid, file] of files) {
       try {
-        for (const m of JSON.parse(fs.readFileSync(file, 'utf8')))
+        for (const m of parseHistory(fs.readFileSync(file, 'utf8')))
           if (m.role === 'assistant' && m.usage && m.ts) entries.push({ t: m.ts, p: pid, s: sid, i: m.usage.input | 0, o: m.usage.output | 0, c: m.usage.cached | 0 });
       } catch {}
     }
