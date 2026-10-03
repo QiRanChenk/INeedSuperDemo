@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import net from 'node:net';
 import path from 'node:path';
 import fs from 'node:fs';
-import { getProjectLlm } from './config.js';
+import { getProjectLlm, childEnv } from './config.js';
 import { projectDir, readProject, syncSdk } from './registry.js';
 
 const procs = new Map(); // id -> { proc, status, logs, startedAt, want, crashes }
@@ -51,8 +51,7 @@ export function logs(id) { return entry(id).logs; }
 
 export function projectEnv(project) {
   const llm = getProjectLlm();
-  return {
-    ...process.env,
+  return childEnv({
     PORT: String(project.port),
     HOST: '127.0.0.1', // only reachable through the shell proxy (which enforces the shell's access control)
     SUPERDEMO_PROJECT_ID: project.id,
@@ -60,7 +59,7 @@ export function projectEnv(project) {
     SUPERDEMO_LLM_BASE_URL: llm.baseUrl,
     SUPERDEMO_LLM_API_KEY: llm.apiKey,
     SUPERDEMO_LLM_MODEL: llm.model,
-  };
+  });
 }
 
 export async function start(id) {

@@ -61,7 +61,14 @@ export function recordView(token, visitor = '', page = '/') {
   if (!s) return;
   s.views = (s.views || 0) + 1; s.lastViewAt = Date.now();
   writeAll(list);
-  try { fs.appendFileSync(VIEWS, JSON.stringify({ t: Date.now(), k: token, v: String(visitor).slice(0, 32), p: String(page).slice(0, 120) }) + '\n'); } catch {}
+  try {
+    fs.appendFileSync(VIEWS, JSON.stringify({ t: Date.now(), k: token, v: String(visitor).slice(0, 32), p: String(page).slice(0, 120) }) + '\n');
+    // keep the log bounded (a hammered link must not fill the disk): past 5 MB keep the newest half
+    if (Math.random() < 0.02 && fs.statSync(VIEWS).size > 5_000_000) {
+      const lines = fs.readFileSync(VIEWS, 'utf8').split('\n').filter(Boolean);
+      fs.writeFileSync(VIEWS, lines.slice(-Math.floor(lines.length / 2)).join('\n') + '\n');
+    }
+  } catch {}
 }
 
 export function setShareOptions(projectId, token, { feedback }) {

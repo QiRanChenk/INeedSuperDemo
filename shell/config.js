@@ -88,3 +88,12 @@ export function maskKey(key) {
 
 /** Whether page screenshots go to the model. */
 export const visionEnabled = s => s.vision === 'on' || (s.vision === 'auto' && s.visionOk !== false);
+
+// Shell secrets that must never reach project processes or agent shell commands (AI-written code could print them).
+const SECRET_ENV = ['SUPERDEMO_PASSWORD', 'SUPERDEMO_ALLOWED_HOSTS', 'LLM_API_KEY', 'LLM_BASE_URL', 'LLM_MODEL'];
+/** process.env without shell secrets, for child processes. */
+export function childEnv(extra = {}) {
+  const env = { ...process.env };
+  for (const k of SECRET_ENV) delete env[k];
+  return { ...env, ...extra };
+}
