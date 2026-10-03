@@ -42,6 +42,7 @@ export function checkRequest(req) {
 }
 
 export function authMiddleware(req, res, next) {
+  if (req.method === 'GET' && req.path === '/api/health') return next(); // container healthcheck; reveals nothing
   const bad = checkRequest(req);
   if (!bad) return next();
   if (bad.status === 401) {

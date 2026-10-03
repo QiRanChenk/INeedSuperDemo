@@ -24,6 +24,8 @@ app.use(express.static(path.join(ROOT, 'shell', 'ui')));
 
 const wrap = fn => (req, res) => Promise.resolve(fn(req, res)).catch(e => res.status(400).json({ error: e.message }));
 
+app.get('/api/health', (req, res) => res.json({ ok: true }));
+
 // ---- settings ----
 const publicSettings = s => ({
   ...s,

@@ -1,0 +1,23 @@
+# Run the SuperDemo shell on a server / NAS:  cp .env.example .env  (set SUPERDEMO_PASSWORD)  &&  docker compose up -d --build
+services:
+  superdemo:
+    build: .
+    image: superdemo:latest
+    container_name: superdemo
+    restart: unless-stopped
+    init: true # reaps the project processes / shell commands the agent spawns
+    ports:
+      - "${HOST_PORT:-18788}:3000"
+    environment:
+      HOST: 0.0.0.0
+      # Required when listening beyond loopback: the agent can run commands. Browser login, any username.
+      SUPERDEMO_PASSWORD: ${SUPERDEMO_PASSWORD:?set SUPERDEMO_PASSWORD in .env}
+      TZ: Asia/Shanghai
+    volumes:
+      - ./data:/app/data           # settings (model / API key), token usage log
+      - ./projects:/app/projects   # generated demo projects incl. their databases, sessions and versions
+      # Code is bind-mounted so an upgrade is "sync files + restart"; node_modules stay in the image.
+      # (Comment these three lines out to run purely from the image.)
+      - ./shell:/app/shell:ro
+      - ./sdk:/app/sdk:ro
+      - ./templates:/app/templates:ro

@@ -60,6 +60,17 @@ HOST=0.0.0.0 SUPERDEMO_PASSWORD='一个足够长的随机口令' npm start   # �
 
 壳内运行的项目同样只监听 `127.0.0.1`，只能经由壳的 `/p/<id>/` 访问（受同一口令保护）；导出 / Docker 部署后照常监听所有网卡。
 
+### 部署到服务器 / NAS
+
+壳本身也能用 Docker 运行（项目作为容器内子进程，经 `/p/<id>/` 访问）：
+
+```bash
+cp .env.example .env    # 填 SUPERDEMO_PASSWORD（必填）、可选 HOST_PORT（默认 18788）
+docker compose up -d --build
+```
+
+`data/`（模型设置与 Key）和 `projects/`（项目、数据库、会话、版本）挂载在宿主机。`deploy/fnos-deploy.py` 是一键部署到飞牛 fnOS 的脚本：本机构建对应架构的镜像后传过去，依赖不变时只同步代码并重启；首次部署会带上本机的模型设置与项目。容器内不能再「构建 Docker 镜像」，zip 导出照常可用。
+
 ## 内置样例：数据洞察助手
 
 新建 B/S 项目默认得到一个可用的「数据洞察助手」：
