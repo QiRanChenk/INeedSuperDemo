@@ -19,7 +19,7 @@ const SYSTEM = `你是资深的产品顾问，帮业务人员把一句话想法�
   "highlights": ["让演示出彩的 1-3 个点，可包含 AI 能力，如：AI 自动总结拜访记录"],
   "outOfScope": ["这一版先不做的，避免范围过大，如：登录与权限、短信通知"]
 }
-要求：页面 2-5 个、流程 2-5 条、数据对象 1-4 个，围绕最核心的价值，宁少勿滥；不要写技术实现（数据库、接口、框架）；全部用中文。`;
+要求：这是第一版 Demo，只做最能体现价值的部分——页面 2-3 个、流程 2-4 条、数据对象 1-3 个，宁少勿滥（其余放进 outOfScope，以后再迭代）；不要写技术实现（数据库、接口、框架）；全部用中文。`;
 
 /** description -> plan object. Throws on LLM failure. */
 export async function makePlan(description) {
@@ -70,6 +70,11 @@ export function planToMessage(plan, description) {
     sec('演示亮点', p.highlights.map(x => `- ${x}`)),
     sec('这一版不做', p.outOfScope.map(x => `- ${x}`)),
     sec('用户补充', [p.notes].filter(Boolean)),
-    '完成标准：每个页面都能用、关键流程能走通、有贴近业务的示例数据；用 page_view 在电脑和手机（device=mobile）两种尺寸下检查过观感；最后简短说明做了什么、怎么演示。',
+    '## 工作方式（请照做，效率优先）',
+    '1. 读骨架的 server.js 和页面文件了解结构（SDK 用法看系统提示里的文档，不要读 sdk/ 源码），然后一次写好后端：数据表 + 接口 + 示例数据。示例数据贴近业务即可，用 http_request 校验一次，不要反复打磨数值和分布。',
+    '2. 写页面：用组件库，每个页面一次写完整；方案外的功能不要加（想到的好点子写进最后的总结作为建议）。',
+    '3. 用 page_view 看电脑效果、page_act 走通关键流程（弹窗里的字段用 label 定位，一次调用完成点开-填写-保存），再用 page_view 的 device="mobile" 看手机效果，有问题就修。',
+    '4. 简短总结：做了什么、怎么演示、建议的下一步。',
+    '完成标准：每个页面都能用、关键流程能走通、有贴近业务的示例数据、电脑和手机都看过。',
   ].join('\n').replace(/\n{3,}/g, '\n\n');
 }

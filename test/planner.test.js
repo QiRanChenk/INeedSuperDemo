@@ -22,7 +22,7 @@ test('planToMessage: sections only when present, always ends with the completion
   assert.match(m, /当前起步骨架：管理后台/);
   assert.match(m, /## 页面\n- 库存：看/);
   assert.doesNotMatch(m, /## 数据/);
-  assert.match(m, /device=mobile/);
+  assert.match(m, /device="mobile"/);
 });
 
 test('feedbackToMessage: numbered, page + author + phone hint', () => {

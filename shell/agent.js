@@ -14,7 +14,8 @@ export { loadHistory, clearHistory } from './sessions.js';
 const TOOLS = [
   tool('list_files', '列出项目目录树（相对项目根目录）', { path: { type: 'string', description: '相对路径，默认 "."' } }),
   tool('read_file', '读取项目内文件。大文件请配合 offset/limit 只读需要的行（先用 grep 定位行号）', {
-    path: { type: 'string' }, offset: { type: 'integer', description: '起始行号（从 1 开始），可选' }, limit: { type: 'integer', description: '读取行数，可选，默认 200' } }, ['path']),
+    path: { type: 'string' }, offset: { type: 'integer', description: '起始行号（从 1 开始），可选' }, limit: { type: 'integer', description: '读取行数，可选，默认 200' },
+    force: { type: 'boolean', description: '仅在确需阅读 sdk/ 源码时使用' } }, ['path']),
   tool('edit_file', '修改已有文件：把 old_string 精确替换为 new_string。old_string 必须与原文逐字一致（含缩进）且在文件中唯一；不唯一时加更多上下文，或设 replace_all=true。改已有文件优先用它，比整文件重写快且安全', {
     path: { type: 'string' }, old_string: { type: 'string' }, new_string: { type: 'string' }, replace_all: { type: 'boolean', description: '替换所有出现处，默认 false' } }, ['path', 'old_string', 'new_string']),
   tool('write_file', '写入（覆盖或新建）项目内文件，自动创建目录。用于新建文件或整文件重写', { path: { type: 'string' }, content: { type: 'string' } }, ['path', 'content']),
@@ -399,6 +400,10 @@ function qualityGap(project, ctx) {
   return out;
 }
 
+// The SDK docs are in the system prompt; reading sdk/ sources costs many iterations and is almost never needed.
+const isSdkPath = p => /^(\.\/)?sdk(\/|$)/.test(String(p || '').trim());
+const SDK_SOURCE_NOTE = 'SDK 的用法已完整写在系统提示的「SDK 文档」里，请直接按文档使用，不要读 sdk/ 源码。若确实怀疑 SDK 本身有问题，再带上 force: true 重新调用。';
+
 const NO_BROWSER = 'ERROR: 当前没有打开的 SuperDemo 页面可执行页面操作（需要用户在浏览器中打开 SuperDemo）。本轮不要再调用 page_view / page_act，改用 http_request 自测。';
 
 async function execTool(project, name, args, ctx) {
@@ -407,6 +412,7 @@ async function execTool(project, name, args, ctx) {
     case 'list_files':
       return fileTree(id, args.path || '.').join('\n') || '(empty)';
     case 'read_file':
+      if (isSdkPath(args.path) && !args.force && !/README\.md$/i.test(args.path)) return SDK_SOURCE_NOTE;
       return readText(safePath(id, args.path), args.path, args);
     case 'write_file': {
       const abs = safePath(id, args.path);
@@ -428,6 +434,7 @@ async function execTool(project, name, args, ctx) {
       return 'ERROR: 不存在';
     }
     case 'grep':
+      if (isSdkPath(args.path) && !args.force) return SDK_SOURCE_NOTE;
       return grepFiles(projectDir(id), args);
     case 'http_request': {
       const st = await ctx.flush();
