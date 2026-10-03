@@ -106,6 +106,8 @@
       <label class="inline">最大迭代<input id="stIter" type="number" min="1" max="200"></label>
       <label class="inline">上下文窗口 (tokens)<input id="stCtx" type="number" min="1000" step="1000" placeholder="1000000"></label></div>
     <label class="check"><input type="checkbox" id="stStream" checked> 流式输出（逐字显示；个别网关不支持 SSE 时可关闭）</label>
+    <label>页面截图给模型<select id="stVision"><option value="auto">自动（先发送，模型不支持时自动关闭）</option><option value="on">总是发送</option><option value="off">不发送（只用页面结构文本）</option></select></label>
+    <div id="stVisionState" class="small muted"></div>
     <div id="stResult" class="small muted"></div>
     <div class="row end"><button type="button" id="stTest" class="ghost">保存并测试连接</button><button type="submit" class="primary">保存</button></div>
 
@@ -204,6 +206,7 @@
   </div>
 </dialog>
 <script src="usage.js"></script>
+<script src="pagebot.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

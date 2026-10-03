@@ -164,7 +164,7 @@ async function loadHistory() {
   if (viewKey() !== pid) return; // switched while fetching
   const box = $('#messages'); box.innerHTML = '';
   for (const m of hist) {
-    if (m.role === 'user') { m.system ? addSys(pid, firstLine(m.content)) : m.interjection ? addInterjection(pid, m.content) : addMsg(pid, 'user', m.content); continue; }
+    if (m.role === 'user') { m.image ? addShot(pid, m.image, firstLine(m.content)) : m.system ? addSys(pid, firstLine(m.content)) : m.interjection ? addInterjection(pid, m.content) : addMsg(pid, 'user', m.content); continue; }
     if (m.role === 'assistant') {
       if (m.reasoning) addReasoning(pid, m.reasoning);
       if (m.content) addMsg(pid, 'assistant', m.content);
@@ -197,6 +197,8 @@ function addTool(pid, name, args) {
   const a = !args ? '' : name === 'http_request' ? `${args.method || 'GET'} ${args.path || ''}`
     : name === 'grep' ? `/${args.pattern || ''}/ ${args.path || ''}`
     : name === 'read_file' && args.offset ? `${args.path} :${args.offset}${args.limit ? '+' + args.limit : ''}`
+    : name === 'page_view' ? (args.path || '当前页面')
+    : name === 'page_act' ? (args.actions || []).map(a => `${a.type}${a.ref ? ' ' + a.ref : ''}${a.value != null && a.value !== '' ? ' ' + JSON.stringify(a.value).slice(0, 24) : ''}`).join(' → ')
     : args.path || args.command || (args.lines ? `${args.lines} lines` : '');
   d.innerHTML = `<b>${esc(name)}</b> ${esc(typeof a === 'string' ? a : JSON.stringify(a))}`;
   return append(pid, d);
@@ -382,13 +384,27 @@ function handleEvent(pid, ev) {
     case 'restarting': addSys(pid, '↻ 文件已修改，重启项目…'); break;
     case 'restarted': addSys(pid, ev.status === 'running' ? '✓ 项目已重启' : '✗ 重启后状态: ' + ev.status); if (ev.status === 'running' && sameProject(pid)) setTimeout(reloadFrame, 400); break;
     case 'snapshot': addUndo(pid, ev); break;
+    case 'browser': { const projectId = String(pid).split(':')[0]; PageBot.handle(projectId, ev, current?.id === projectId && current.hasUi ? $('#frame') : null).finally(() => pageBotBusy.delete(ev.reqId)); pageBotBusy.add(ev.reqId); break; }
+    case 'shot': addShot(pid, ev.file, '页面截图（' + ev.info + '）'); break;
+    case 'vision_off': addSys(pid, '当前模型不接受图片，已改为只发送页面结构文本（可在模型设置中调整）'); break;
     case 'web_errors': addSys(pid, `⚠ 预览页面报告了 ${ev.count} 个前端错误，已交给 AI 处理`); break;
     case 'done': finishText(pid, ev.content); if (ev.stopped) addSys(pid, '■ 已停止'); if (sameProject(pid)) reloadFrame(); break;
     case 'error': addMsg(pid, 'error', ev.message); break;
   }
 }
 
-function reloadFrame() { const f = $('#frame'); if (current?.hasUi) f.src = `/p/${current.id}/?t=${Date.now()}`; }
+// while the agent is operating the preview, an automatic reload would wipe what it is doing
+const pageBotBusy = new Set();
+function reloadFrame() { const f = $('#frame'); if (current?.hasUi && !pageBotBusy.size) f.src = `/p/${current.id}/?t=${Date.now()}`; }
+function addShot(pid, file, label) {
+  const d = addSys(pid, '📷 ' + label.replace(/^↻\s*/, ''));
+  const projectId = String(pid).split(':')[0];
+  const img = document.createElement('img'); img.className = 'shot'; img.loading = 'lazy'; img.alt = 'AI 看到的页面';
+  img.src = `/api/projects/${projectId}/shots/${file}`;
+  img.onclick = () => window.open(img.src, '_blank');
+  d.appendChild(img);
+  return d;
+}
 
 // ---------- settings (fixed panel) ----------
 async function loadSettings() {
@@ -404,6 +420,8 @@ async function loadSettings() {
   $('#stBase').value = settings.baseUrl; $('#stModel').value = settings.model; $('#stKey').value = '';
   $('#stKey').placeholder = settings.hasKey ? `已配置 ${settings.apiKey}（留空保持不变）` : 'sk-…';
   $('#stTemp').value = settings.temperature; $('#stIter').value = settings.maxIterations; $('#stCtx').value = settings.contextWindow; $('#stStream').checked = settings.stream !== false;
+  $('#stVision').value = settings.vision || 'auto';
+  $('#stVisionState').textContent = settings.vision === 'auto' ? (settings.visionOk === true ? '已检测：当前模型支持图片' : settings.visionOk === false ? '已检测：当前模型不支持图片，只发送页面结构文本' : '尚未检测（AI 第一次查看页面时自动判断）') : '';
   // project-side LLM
   const pl = settings.projectLlm;
   $('#stUseShell').checked = pl.useShell;
@@ -437,7 +455,7 @@ function toggleSettings(open) {
   else if (dlg.open) dlg.close();
 }
 async function saveSettings() {
-  const body = { baseUrl: $('#stBase').value, model: $('#stModel').value, temperature: $('#stTemp').value, maxIterations: $('#stIter').value, contextWindow: $('#stCtx').value, stream: $('#stStream').checked, projectLlm: collectProjectLlm() };
+  const body = { baseUrl: $('#stBase').value, model: $('#stModel').value, temperature: $('#stTemp').value, maxIterations: $('#stIter').value, contextWindow: $('#stCtx').value, stream: $('#stStream').checked, vision: $('#stVision').value, projectLlm: collectProjectLlm() };
   if ($('#stKey').value) body.apiKey = $('#stKey').value;
   const saved = await api('/api/settings', { method: 'PUT', body });
   await loadSettings();

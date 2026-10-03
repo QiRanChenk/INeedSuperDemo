@@ -114,6 +114,7 @@ export function injectReporter(html, id) {
 }
 
 // Reports uncaught errors, unhandled rejections, console.error, failed resources and 5xx fetches to the shell.
+// Also counts in-flight fetch / XHR (window.__sdInflight) so the agent's page tools can wait for the page to settle.
 function errorReporter(id) {
   return `(function(){var u='/api/projects/${id}/client-errors',n=0;
 function s(k,m){if(n++>30)return;try{var b=JSON.stringify({kind:k,message:String(m).slice(0,1500),page:location.pathname.replace(/^\\/p\\/[^/]+/,'')});
@@ -122,7 +123,9 @@ addEventListener('error',function(e){var t=e.target;if(t&&t!==window&&(t.src||t.
 s('error',(e.message||'Error')+(e.filename?' @ '+e.filename.replace(location.origin,'')+':'+e.lineno+':'+e.colno:'')+(e.error&&e.error.stack?'\\n'+String(e.error.stack).split('\\n').slice(1,4).join('\\n'):''));},true);
 addEventListener('unhandledrejection',function(e){var r=e.reason;s('promise',(r&&(r.stack||r.message))||String(r));});
 var ce=console.error;console.error=function(){try{s('console',[].map.call(arguments,function(a){return a&&a.stack?a.stack:typeof a==='object'?JSON.stringify(a):String(a);}).join(' '));}catch(_){}return ce.apply(console,arguments);};
-var f=window.fetch;if(f)window.fetch=function(){var a=arguments;return f.apply(this,a).then(function(r){if(r.status>=500)s('http','请求失败 '+r.status+' '+(a[0]&&a[0].url||a[0]));return r;});};})();`;
+window.__sdInflight=0;function dn(){window.__sdInflight=Math.max(0,window.__sdInflight-1);}
+var f=window.fetch;if(f)window.fetch=function(){var a=arguments;window.__sdInflight++;return f.apply(this,a).then(function(r){dn();if(r.status>=500)s('http','请求失败 '+r.status+' '+(a[0]&&a[0].url||a[0]));return r;},function(e){dn();throw e;});};
+var xs=XMLHttpRequest.prototype.send;XMLHttpRequest.prototype.send=function(){window.__sdInflight++;this.addEventListener('loadend',dn);return xs.apply(this,arguments);};})();`;
 }
 
 /** visitor: share-link wording (no internal status words). */

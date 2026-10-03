@@ -50,3 +50,15 @@ test('internal fields never reach the model', () => {
   const { messages } = compactHistory([{ role: 'user', content: 'hi', ts: 1 }, { role: 'assistant', content: null, reasoning: 'r', usage: {}, ts: 2 }]);
   assert.deepEqual(messages, [{ role: 'user', content: 'hi' }, { role: 'assistant', content: '' }]);
 });
+
+test('screenshots: only the latest two in kept turns carry an image marker; the image field never leaks', () => {
+  const h = [{ role: 'user', content: 'go' }];
+  for (let i = 0; i < 3; i++) {
+    h.push({ role: 'assistant', content: '', tool_calls: [call('p' + i, 'page_view', {})] });
+    h.push({ role: 'tool', tool_call_id: 'p' + i, content: 'snapshot' });
+    h.push({ role: 'user', system: true, content: '[系统] 页面截图', image: `s${i}.jpg` });
+  }
+  const { messages } = compactHistory(h);
+  assert.deepEqual(messages.filter(m => m._image).map(m => m._image), ['s1.jpg', 's2.jpg']);
+  assert.ok(messages.every(m => !('image' in m)));
+});

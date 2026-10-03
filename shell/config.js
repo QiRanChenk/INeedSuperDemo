@@ -45,6 +45,9 @@ export function getSettings() {
     maxIterations: Number.isInteger(s.maxIterations) && s.maxIterations >= 1 ? s.maxIterations : 25,
     contextWindow: Number.isInteger(s.contextWindow) && s.contextWindow >= 1000 ? s.contextWindow : 1_000_000, // tokens
     stream: s.stream !== false, // streaming chat completions; turn off for gateways that mangle SSE
+    // screenshots for page_view / page_act: auto = send, and switch off by itself if the model rejects images
+    vision: ['auto', 'on', 'off'].includes(s.vision) ? s.vision : 'auto',
+    visionOk: typeof s.visionOk === 'boolean' ? s.visionOk : null, // auto-detected support of the current model
     // LLM used INSIDE generated projects (env SUPERDEMO_LLM_*). useShell=true -> same as the shell agent.
     projectLlm: {
       useShell: pl.useShell !== false,
@@ -81,3 +84,6 @@ export function maskKey(key) {
   if (key.length <= 8) return '****';
   return key.slice(0, 4) + '****' + key.slice(-4);
 }
+
+/** Whether page screenshots go to the model. */
+export const visionEnabled = s => s.vision === 'on' || (s.vision === 'auto' && s.visionOk !== false);

@@ -7,7 +7,7 @@ import * as runner from './runner.js';
 import { proxyMiddleware, proxyUpgrade, shareMiddleware, upgradeTarget } from './proxy.js';
 import { listShares, createShare, revokeShare, deleteSharesOf } from './shares.js';
 import { testConnection } from './llm.js';
-import { runAgent, attachRun, stopRun, interject, listQueue, enqueue, dequeue, clearQueue, isBusy, usageSummary, generateProjectName, getContextInfo } from './agent.js';
+import { runAgent, attachRun, stopRun, interject, listQueue, enqueue, dequeue, clearQueue, isBusy, usageSummary, generateProjectName, getContextInfo, claimBrowser, resolveBrowser, shotPath } from './agent.js';
 import { summary as usageLogSummary, readLog, backfillIfNeeded } from './usagelog.js';
 import { listSessions, createSession, renameSession, deleteSession, setCurrentSession, loadHistory, clearHistory, lastChatAt, appendHistory } from './sessions.js';
 import { zipProject, dockerInfo, imageInfo, buildImage, isBuilding, saveImage, runHints } from './export.js';
@@ -37,7 +37,7 @@ const publicSettings = s => ({
 });
 app.get('/api/settings', (req, res) => res.json({ ...publicSettings(getSettings()), presets: PRESETS }));
 app.put('/api/settings', wrap(async (req, res) => {
-  const { baseUrl, apiKey, model, temperature, maxIterations, contextWindow, stream, projectLlm } = req.body || {};
+  const { baseUrl, apiKey, model, temperature, maxIterations, contextWindow, stream, projectLlm, vision } = req.body || {};
   const before = JSON.stringify(getProjectLlm());
   const patch = {};
   if (projectLlm && typeof projectLlm === 'object') {
@@ -56,6 +56,10 @@ app.put('/api/settings', wrap(async (req, res) => {
   const cw = parseInt(contextWindow, 10);
   if (contextWindow !== undefined && Number.isInteger(cw) && cw >= 1000 && cw <= 100_000_000) patch.contextWindow = cw;
   if (stream !== undefined) patch.stream = !!stream;
+  if (['auto', 'on', 'off'].includes(vision)) patch.vision = vision;
+  // model / endpoint / vision mode changed -> image support has to be detected again
+  const cur = getSettings();
+  if ((patch.vision && patch.vision !== cur.vision) || (patch.model && patch.model !== cur.model) || (patch.baseUrl && patch.baseUrl !== cur.baseUrl)) patch.visionOk = null;
   const s = saveSettings(patch);
   // project-side LLM changed -> restart running projects so the new env takes effect
   let restarted = [];
@@ -128,6 +132,15 @@ app.post('/api/projects/:id/client-errors', (req, res) => {
   if (recentWebErrors.size > 500) for (const [k, t] of recentWebErrors) if (now - t > 60_000) recentWebErrors.delete(k);
   runner.log(id, 'web', msg);
 });
+
+// ---- agent page tools: an open tab claims the request, works on the preview and posts the result ----
+app.post('/api/projects/:id/browser/:reqId/claim', (req, res) => res.json({ ok: claimBrowser(req.params.id, req.params.reqId) }));
+app.post('/api/projects/:id/browser/:reqId/result', (req, res) => res.json({ ok: resolveBrowser(req.params.id, req.params.reqId, req.body || {}) }));
+app.get('/api/projects/:id/shots/:file', wrap((req, res) => {
+  const f = shotPath(req.params.id, req.params.file);
+  if (!f || !fs.existsSync(f)) return res.status(404).end();
+  res.type('image/jpeg').sendFile(f);
+}));
 
 // ---- share links ----
 app.get('/api/projects/:id/shares', wrap((req, res) => res.json(listShares(req.params.id))));

@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { chat, StoppedError } from './llm.js';
-import { getSettings, SDK_DIR } from './config.js';
-import { readProject, projectDir, safePath, fileTree } from './registry.js';
+import { getSettings, saveSettings, visionEnabled, SDK_DIR } from './config.js';
+import { readProject, projectDir, safePath, fileTree, PROJECT_TYPES } from './registry.js';
 import { restart, logs, status, waitForPort } from './runner.js';
 import { loadHistory, appendHistory, resolveSession } from './sessions.js';
 import { logUsage } from './usagelog.js';
@@ -25,6 +25,13 @@ const TOOLS = [
   tool('http_request', '向本项目发送 HTTP 请求做自测（会先应用未生效的修改并等待服务就绪）。path 为相对项目根的路径，如 "api/items?limit=5"', {
     method: { type: 'string', description: 'GET / POST / PUT / DELETE …，默认 GET' }, path: { type: 'string' },
     body: { description: 'JSON 对象（自动设置 content-type）或字符串' }, headers: { type: 'object' } }, ['path']),
+  tool('page_view', '查看项目页面的实际效果：返回页面结构（可点击元素带 [e数字] 编号、输入框当前值、表格、文字）和自动检查出的布局问题（横向溢出、遮挡、截断、低对比度、图片失败）；模型支持图片时附带截图。改完界面后用它确认效果', {
+    path: { type: 'string', description: '要打开的页面，相对项目根，如 "" 或 "admin.html#/orders"；不填则查看当前页面' } }),
+  tool('page_act', '像用户一样操作页面并返回操作后的页面（同 page_view）。用 page_view 返回的 ref 定位元素。用于走一遍关键业务流程：填表、提交、切换、删除等。确认框会自动点确定', {
+    actions: { type: 'array', description: '按顺序执行，最多 20 步', items: { type: 'object', properties: {
+      type: { type: 'string', enum: ['click', 'fill', 'select', 'check', 'press', 'scroll', 'navigate', 'wait'] },
+      ref: { type: 'string', description: '元素编号，如 "e12"' },
+      value: { description: 'fill 的文字 / select 的选项值或文字 / check 的 true|false / press 的按键名 / navigate 的路径 / wait 的毫秒' } }, required: ['type'] } } }, ['actions']),
   tool('run_command', '在项目根目录执行 shell 命令（如 npm install xxx），60 秒超时。不要用它查看或修改文件、也不要用 curl 测接口——用对应工具', { command: { type: 'string' } }, ['command']),
   tool('get_logs', '获取项目最近的运行日志：[out]/[err] 为服务端输出，[web] 为预览页面在浏览器里的报错', { lines: { type: 'integer', description: '默认 60' } }),
   tool('restart_project', '立即重启项目进程并返回启动状态。写文件后会自动重启，通常不需要手动调用', {}),
@@ -118,7 +125,13 @@ export function compactHistory(history) {
   const turnOf = history.map(m => (m.role === 'user' && !m.system && !m.interjection) ? ++turn : turn);
   const cut = Math.max(0, Math.floor((history.length - RECENT_MSGS) / BUCKET) * BUCKET);
   const superseded = supersededReads(history);
-  const build = keep => history.map((m, i) => strip(turn - turnOf[i] >= keep ? compactMessage(m) : i < cut ? softCompact(m, superseded) : m));
+  const imageAt = new Set(history.map((m, i) => (m.image ? i : -1)).filter(i => i >= 0).slice(-MAX_IMAGES));
+  const build = keep => history.map((m, i) => {
+    const old = turn - turnOf[i] >= keep;
+    const out = strip(old ? compactMessage(m) : i < cut ? softCompact(m, superseded) : m);
+    if (m.image && !old && imageAt.has(i)) out._image = m.image;
+    return out;
+  });
   let out = build(KEEP_FULL_TURNS);
   if (JSON.stringify(out).length > SOFT_LIMIT_CHARS) out = build(1);
   const compacted = out.filter(m => m._compacted).length;
@@ -249,9 +262,80 @@ export function attachRun(id, onEvent) {
   onEvent({ type: 'attached', session: run.sid, iteration: run.live.iteration, queue: listQueue(id) });
   if (run.live.iteration) onEvent({ type: 'thinking', iteration: run.live.iteration });
   if (run.live.content || run.live.reasoning) onEvent({ type: 'delta', content: run.live.content || undefined, reasoning: run.live.reasoning || undefined });
+  if (run.live.browser) onEvent(run.live.browser);
   run.subs.add(onEvent);
   return () => run.subs.delete(onEvent);
 }
+
+// ---- page tools: the request goes to an open SuperDemo tab (the server has no browser) ----
+const browserReqs = new Map(); // reqId -> { id, claimed, finish, claimTimer }
+const CLAIM_TIMEOUT = 8_000, RESULT_TIMEOUT = 90_000;
+function requestBrowser(run, id, op, args, opts) {
+  return new Promise(resolve => {
+    const reqId = 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const ev = { type: 'browser', reqId, op, args, vision: opts.vision, reload: opts.reload };
+    const finish = r => {
+      if (!browserReqs.has(reqId)) return;
+      const q = browserReqs.get(reqId);
+      clearTimeout(q.claimTimer); clearTimeout(q.resultTimer); browserReqs.delete(reqId);
+      run.ctrl.signal.removeEventListener('abort', onAbort);
+      if (run.live.browser === ev) run.live.browser = null;
+      resolve(r);
+    };
+    const onAbort = () => finish({ ok: false, error: 'stopped' });
+    browserReqs.set(reqId, {
+      id, claimed: false, finish,
+      claimTimer: setTimeout(() => finish({ ok: false, error: 'nobrowser' }), CLAIM_TIMEOUT),
+      resultTimer: setTimeout(() => finish({ ok: false, error: 'timeout' }), RESULT_TIMEOUT),
+    });
+    run.ctrl.signal.addEventListener('abort', onAbort, { once: true });
+    run.live.browser = ev; // replayed to tabs that attach while the request is open
+    run.emit(ev);
+  });
+}
+/** First tab to claim a request executes it; returns false for everyone else. */
+export function claimBrowser(id, reqId) {
+  const q = browserReqs.get(reqId);
+  if (!q || q.id !== id || q.claimed) return false;
+  q.claimed = true; clearTimeout(q.claimTimer);
+  return true;
+}
+export function resolveBrowser(id, reqId, result) {
+  const q = browserReqs.get(reqId);
+  if (!q || q.id !== id || !q.claimed) return false;
+  q.finish({ ok: !!result.ok, text: String(result.text || ''), error: result.error, image: result.image, imageInfo: result.imageInfo, visible: !!result.visible });
+  return true;
+}
+
+// screenshots are files (history only keeps the name); the two most recent ones in the kept turns are sent to the model
+const shotsDir = id => path.join(projectDir(id), '.superdemo', 'shots');
+export function shotPath(id, file) { return /^[a-z0-9]+\.jpg$/.test(file) ? path.join(shotsDir(id), file) : null; }
+function saveShot(id, dataUrl) {
+  const m = /^data:image\/jpeg;base64,(.+)$/.exec(dataUrl || '');
+  if (!m) return null;
+  const dir = shotsDir(id);
+  fs.mkdirSync(dir, { recursive: true });
+  const file = Date.now().toString(36) + Math.random().toString(36).slice(2, 5) + '.jpg';
+  fs.writeFileSync(path.join(dir, file), Buffer.from(m[1], 'base64'));
+  const all = fs.readdirSync(dir).filter(f => f.endsWith('.jpg')).sort();
+  for (const f of all.slice(0, Math.max(0, all.length - 40))) fs.rmSync(path.join(dir, f), { force: true });
+  return file;
+}
+const MAX_IMAGES = 2;
+/** Turn `_image` markers into OpenAI multi-part user content (or drop them when screenshots are off). */
+function withImages(id, messages, vision) {
+  return messages.map(m => {
+    if (!m._image) return m;
+    const { _image, ...rest } = m;
+    if (!vision) return rest;
+    try {
+      const b64 = fs.readFileSync(path.join(shotsDir(id), _image)).toString('base64');
+      return { ...rest, content: [{ type: 'text', text: rest.content }, { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } }] };
+    } catch { return rest; }
+  });
+}
+const hasImage = messages => messages.some(m => Array.isArray(m.content));
+const isImageRejection = e => /HTTP 4\d\d/.test(e.message) && /image|vision|multimodal|multi-modal|图片|图像|不支持.*(格式|类型)/i.test(e.message);
 
 /** Static per project (no file tree / logs) so the provider's prompt cache keeps hitting across turns. */
 function systemPrompt(project) {
@@ -276,11 +360,11 @@ function systemPrompt(project) {
    - 大文件先 grep 定位，再用 read_file 的 offset/limit 读相关片段；修改前务必看过要改的原文。
    - 禁止用 run_command 执行 node -e / sed / python / cat / grep 等来查看或改文件。
    - 写入 .js 文件后会自动做语法检查，结果附在工具返回里；有语法错误先修复。
-6. 自测用 http_request 调本项目接口（不要用 curl，不要 sleep 等待）。get_logs 里的 [web] 行是预览页面在用户浏览器中的报错，需要修复。
+6. 自测：接口用 http_request（不要用 curl，不要 sleep 等待）；有界面的改动完成后，用 page_view 看实际页面，再用 page_act 按用户的方式走一遍关键流程（录入、提交、查看结果），确认没有报错、布局正常、数据正确，发现问题就修复后再看。get_logs 里的 [web] 行是预览页面在浏览器中的报错，需要修复。
 7. 项目要能独立部署：不要依赖壳的任何文件，只依赖项目目录内内容和环境变量。
 8. 数据存储必须是真数据库：任何需要保存的数据（表单、用户、订单、配置、上传数据集等）都必须通过 sdk 的 openDb()（SQLite，文件 data/app.db）建表存取，禁止用内存变量、全局数组或 JSON 文件充当数据库。用 db.ensureTable 在启动时建表，读写用 db.query / db.insert / db.run。上传文件等运行时数据放在 data/ 下。
 9. 面向用户的界面绝不暴露技术栈与技术细节：页面文字、提示、页脚、空状态、状态栏中禁止出现 SQLite、数据库、数据表、表名、Node、SDK、API、JSON、接口、端口、文件路径、模型名等词汇；一律用业务语言（如"已保存"而非"已写入数据库"，"历史记录"而非"analyses 表"）。用户是业务人员，不是开发者。技术说明只写在 README 或代码注释里。
-10. 全部完成后，用简短中文向用户说明：改了哪些文件、新增了什么能力、如何验证。不要输出整段代码。
+10. 过程中的说明与最终回复都用中文。全部完成后，用简短中文向用户说明：改了哪些文件、新增了什么能力、如何验证。不要输出整段代码。
 
 # SDK 文档
 ${sdkDoc}`;
@@ -299,6 +383,8 @@ function webErrorsSince(id, since) {
   return out;
 }
 const webErrorNote = errs => `[系统] 预览页面在浏览器中报告了 ${errs.length} 条前端错误，请排查修复：\n${errs.slice(-10).join('\n')}`;
+
+const NO_BROWSER = 'ERROR: 当前没有打开的 SuperDemo 页面可执行页面操作（需要用户在浏览器中打开 SuperDemo）。本轮不要再调用 page_view / page_act，改用 http_request 自测。';
 
 async function execTool(project, name, args, ctx) {
   const id = project.id;
@@ -335,6 +421,32 @@ async function execTool(project, name, args, ctx) {
         if (status(id).status !== 'running') return `ERROR: 项目未在运行（状态 ${status(id).status}），无法请求。最近日志:\n${formatLogs(id, 20)}`;
       }
       return httpRequest(project.port, args, ctx.signal);
+    }
+    case 'page_view':
+    case 'page_act': {
+      if (!PROJECT_TYPES[project.type]?.hasUi) return 'ERROR: 该项目没有界面，请用 http_request 自测';
+      await ctx.flush();
+      if (status(id).status === 'starting') await waitForPort(project.port, 8000);
+      if (status(id).status !== 'running') return `ERROR: 项目未在运行（状态 ${status(id).status}）。最近日志:\n${formatLogs(id, 20)}`;
+      // nobody claimed a page request earlier in this turn and no new tab attached since: fail fast instead of waiting again
+      if (ctx.noBrowserSubs != null && ctx.subs() <= ctx.noBrowserSubs) return NO_BROWSER;
+      const t0 = Date.now();
+      const vision = visionEnabled(getSettings());
+      const r = await ctx.browser(name === 'page_view' ? 'view' : 'act', args, { vision, reload: ctx.restartedAt > ctx.browserAt });
+      ctx.browserAt = Date.now();
+      if (!r.ok) {
+        if (r.error === 'nobrowser') { ctx.noBrowserSubs = ctx.subs(); return NO_BROWSER; }
+        if (r.error === 'timeout') return 'ERROR: 页面操作超时（90 秒）';
+        if (r.error === 'stopped') return '[已被用户停止]';
+        return 'ERROR: 页面操作失败 ' + r.error;
+      }
+      let text = r.text;
+      const web = webErrorsSince(id, t0 - 1);
+      if (web.length) { text += `\n\n浏览器报错（${web.length} 条）：\n${web.slice(-8).join('\n')}`; ctx.markWebSeen(); }
+      const file = r.image && saveShot(id, r.image);
+      if (file) { ctx.images.push({ file, info: r.imageInfo }); text += `\n\n[${r.imageInfo}，见后面的截图消息]`; }
+      else if (r.imageInfo) text += `\n\n[${r.imageInfo}]`;
+      return text;
     }
     case 'run_command': {
       // only restart when the command actually changed project code (grep / curl / ls must not trigger a restart)
@@ -427,10 +539,19 @@ async function runAgentInner(project, userMessage, run, sid) {
     onEvent({ type: 'restarting', files: [...ctx.changed] });
     const st = await restart(id);
     ctx.changed.clear();
+    ctx.restartedAt = Date.now();
     onEvent({ type: 'restarted', status: st.status });
     return st.status;
   };
-  const ctx = { changed: new Set(), signal, flush };
+  let webSeen = Date.now();
+  const ctx = {
+    changed: new Set(), signal, flush,
+    browser: (op, args, opts) => requestBrowser(run, id, op, args, opts),
+    subs: () => run.subs.size, noBrowserSubs: null,
+    restartedAt: 0, browserAt: -1, // first page tool call of a turn reloads the page
+    images: [],                    // screenshots taken in the current tool batch
+    markWebSeen: () => { webSeen = Date.now(); },
+  };
   // Mid-run user messages (interjections) become extra user turns at checkpoints so the model sees them before continuing.
   const drain = () => {
     if (!run.queue.length) return false;
@@ -449,7 +570,6 @@ async function runAgentInner(project, userMessage, run, sid) {
   const lastTs = Math.max(history[history.length - 1]?.ts || 0, Date.now() - 30 * 60_000);
   push({ role: 'user', content: userMessage, ts: Date.now() });
   push({ role: 'user', content: treeNote(id), ts: Date.now(), system: true });
-  let webSeen = Date.now();
   const pendingWeb = webErrorsSince(id, lastTs);
   if (pendingWeb.length) push({ role: 'user', content: webErrorNote(pendingWeb), ts: Date.now(), system: true });
   const system = { role: 'system', content: systemPrompt(project) };
@@ -470,8 +590,22 @@ async function runAgentInner(project, userMessage, run, sid) {
     if (web.length && i > 0) { push({ role: 'user', content: webErrorNote(web), ts: Date.now(), system: true }); onEvent({ type: 'web_errors', count: web.length }); rebuild(); }
     onEvent({ type: 'thinking', iteration: i + 1 });
     let r;
-    try { r = await chat({ messages, tools: TOOLS, settings, signal, onDelta: d => onEvent({ type: 'delta', ...d }) }); }
-    catch (e) { if (e instanceof StoppedError || signal.aborted) return stopped(); throw e; }
+    const call = () => {
+      const msgs = withImages(id, messages, visionEnabled(settings));
+      return { images: hasImage(msgs), p: chat({ messages: msgs, tools: TOOLS, settings, signal, onDelta: d => onEvent({ type: 'delta', ...d }) }) };
+    };
+    try {
+      let c = call();
+      try { r = await c.p; }
+      catch (e) {
+        // the model / gateway does not take images: remember (auto mode) and resend without screenshots
+        if (!c.images || !isImageRejection(e) || settings.vision === 'on') throw e;
+        settings.visionOk = false; saveSettings({ visionOk: false });
+        onEvent({ type: 'vision_off' });
+        c = call(); r = await c.p;
+      }
+      if (c.images && settings.visionOk !== true) { settings.visionOk = true; saveSettings({ visionOk: true }); }
+    } catch (e) { if (e instanceof StoppedError || signal.aborted) return stopped(); throw e; }
     const { message, usage, ms, ttft, aborted } = r;
     const nu = normalizeUsage(usage, ms, ttft);
 
@@ -506,6 +640,11 @@ async function runAgentInner(project, userMessage, run, sid) {
       push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: String(result), ts: Date.now() });
     }
 
+    // screenshots go in as user messages after the tool results (tool messages can't carry images)
+    for (const img of ctx.images.splice(0)) {
+      push({ role: 'user', content: `[系统] 页面截图（${img.info}）`, image: img.file, ts: Date.now(), system: true });
+      onEvent({ type: 'shot', file: img.file, info: img.info });
+    }
     // Auto restart after a batch of file changes so the model sees the effect.
     if (ctx.changed.size) {
       const st = await flush();
@@ -523,7 +662,7 @@ async function runAgentInner(project, userMessage, run, sid) {
 }
 
 function strip(m) {
-  const { ts, system, reasoning, name, usage, stopped, interjection, ...rest } = m; // reasoning must NOT be sent back (DeepSeek rejects it)
+  const { ts, system, reasoning, name, usage, stopped, interjection, image, ...rest } = m; // reasoning must NOT be sent back (DeepSeek rejects it)
   if (rest.role === 'assistant' && rest.content == null) rest.content = '';
   if (interjection) rest.content = `[用户插话，请在继续当前任务时一并考虑] ${rest.content}`;
   return rest;

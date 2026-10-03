@@ -146,3 +146,4 @@ body.no-preview { grid-template-columns: var(--sb) 1fr; } body.no-preview #previ
 .msg.sys .undo { margin-left: 8px; padding: 0 8px; font-size: 12px; }
 .vslist li.revoked { opacity: .5; } .vslist .surl { font: 12px ui-monospace, Menlo, monospace; word-break: break-all; color: var(--brand); }
 #dlgShare label.inline { flex: none; } #dlgShare .row { align-items: flex-end; }
+.msg.sys .shot { display: block; margin-top: 6px; max-width: 320px; max-height: 200px; border: 1px solid var(--line); border-radius: 6px; cursor: zoom-in; object-fit: cover; object-position: top; }
