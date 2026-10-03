@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>客户管理</title>
+<link rel="stylesheet" href="_sd/sd.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="sd-topbar">
+  <a class="sd-brand" href="./"><span class="sd-brand-logo">客</span><span id="brand">客户管理</span></a>
+</header>
+
+<main class="sd-page">
+  <div class="sd-page-head">
+    <div>
+      <h1>客户管理</h1>
+      <p>集中管理客户资料与跟进进度，随时掌握销售机会。</p>
+    </div>
+    <div class="sd-actions">
+      <button type="button" id="btnExport">导出</button>
+      <button type="button" id="btnAdd" class="sd-btn-primary">＋ 新增客户</button>
+    </div>
+  </div>
+
+  <!-- KPI cards: filled by renderStats() in app.js -->
+  <section class="sd-stats" id="stats"></section>
+
+  <section class="sd-card sd-card-flush">
+    <div class="sd-card-head">
+      <div class="sd-toolbar">
+        <div class="sd-search"><input id="q" type="search" placeholder="搜索姓名 / 公司 / 电话"></div>
+        <div class="sd-seg" id="statusSeg"></div>
+        <select id="level"></select>
+        <select id="sort">
+          <option value="-created_at">最新创建</option>
+          <option value="-updated_at">最近更新</option>
+          <option value="-amount">金额从高到低</option>
+          <option value="amount">金额从低到高</option>
+        </select>
+      </div>
+    </div>
+    <div class="list-body">
+      <div id="list"><div class="sd-empty">正在加载…</div></div>
+      <div id="pager"></div>
+    </div>
+  </section>
+</main>
+
+<script src="_sd/sd.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

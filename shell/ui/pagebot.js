@@ -10,16 +10,26 @@ const PageBot = (() => {
     return r.json().catch(() => ({}));
   }
 
-  function hiddenFrame(projectId) {
-    let f = offscreen.get(projectId);
+  // off-screen frames per project + device (desktop 1280×800, mobile 390×844)
+  const SIZES = { desktop: [1280, 800], mobile: [390, 844] };
+  function hiddenFrame(projectId, device = 'desktop') {
+    const key = projectId + ':' + device;
+    let f = offscreen.get(key);
     if (!f || !f.isConnected) {
+      const [w, hh] = SIZES[device];
       f = document.createElement('iframe');
       f.setAttribute('aria-hidden', 'true'); f.tabIndex = -1;
-      f.style.cssText = 'position:fixed;left:-20000px;top:0;width:1280px;height:800px;border:0;visibility:hidden';
+      f.style.cssText = `position:fixed;left:-20000px;top:0;width:${w}px;height:${hh}px;border:0;visibility:hidden`;
       document.body.appendChild(f);
-      offscreen.set(projectId, f);
+      offscreen.set(key, f);
     }
     return f;
+  }
+  /** The visible preview is used when it matches the requested device (so the user can watch); otherwise an off-screen frame. */
+  function pickFrame(projectId, device, visibleFrame) {
+    const w = visibleFrame?.clientWidth || 0;
+    if (visibleFrame && (device === 'mobile' ? w > 0 && w <= 500 : w >= 700)) return visibleFrame;
+    return hiddenFrame(projectId, device);
   }
 
   const onProject = (frame, projectId) => { try { return frame.contentWindow.location.pathname.startsWith(`/p/${projectId}/`); } catch { return false; } };
@@ -236,7 +246,7 @@ const PageBot = (() => {
     el.dispatchEvent(new W.Event('change', { bubbles: true }));
   }
 
-  async function act(frame, projectId, actions) {
+  async function act(frame, projectId, actions, refKey = projectId + ':desktop') {
     const log = [];
     for (const [i, a] of (actions || []).slice(0, 20).entries()) {
       const win = frame.contentWindow, doc = win.document;
@@ -245,7 +255,7 @@ const PageBot = (() => {
       const find = () => {
         let el = a.ref ? doc.querySelector(`[data-sd-ref="${a.ref}"]`) : a.selector ? doc.querySelector(a.selector) : null;
         // re-rendered since the snapshot (e.g. a list redrawn after a click): look it up again by tag + name
-        const meta = !el && a.ref && (win.__sdRefs || window.__sdLastRefs?.[projectId])?.[a.ref];
+        const meta = !el && a.ref && (win.__sdRefs || window.__sdLastRefs?.[refKey])?.[a.ref];
         if (meta?.name) {
           const hits = [...doc.querySelectorAll(meta.tag)].filter(e => nameOf(e) === meta.name);
           if (hits.length === 1) { el = hits[0]; el.setAttribute('data-sd-ref', a.ref); }
@@ -285,19 +295,21 @@ const PageBot = (() => {
     const claim = await post(base + '/claim', {});
     if (!claim.ok) return; // another tab took it
     try {
-      const frame = visibleFrame || hiddenFrame(projectId);
+      const device = ev.args?.device === 'mobile' ? 'mobile' : 'desktop';
+      const frame = pickFrame(projectId, device, visibleFrame);
+      const refKey = projectId + ':' + device;
       if (ev.reload || ev.args?.path != null || !onProject(frame, projectId)) await navigate(frame, projectId, ev.args?.path || (onProject(frame, projectId) ? frame.contentWindow.location.pathname.replace(/^\/p\/[^/]+\/?/, '') + frame.contentWindow.location.hash : ''));
       await waitIdle(frame);
       let log = [];
-      if (ev.op === 'act') { if (!frame.contentWindow.__sdRefs && window.__sdLastRefs?.[projectId]) frame.contentWindow.__sdRefs = window.__sdLastRefs[projectId]; log = await act(frame, projectId, ev.args?.actions); }
+      if (ev.op === 'act') { if (!frame.contentWindow.__sdRefs && window.__sdLastRefs?.[refKey]) frame.contentWindow.__sdRefs = window.__sdLastRefs[refKey]; log = await act(frame, projectId, ev.args?.actions, refKey); }
       const text = (log.length ? `执行结果：\n${log.join('\n')}\n\n` : '') + snapshot(frame);
-      (window.__sdLastRefs ||= {})[projectId] = frame.contentWindow.__sdRefs;
+      (window.__sdLastRefs ||= {})[refKey] = frame.contentWindow.__sdRefs;
       let image = null, imageInfo = '';
       if (ev.vision) {
         try { const s = await screenshot(frame); image = s.dataUrl; imageInfo = `截图 ${s.width}×${s.height}（从页面顶部开始${s.scale < 1 ? `，缩放 ${s.scale.toFixed(2)}` : ''}）`; }
         catch (e) { imageInfo = '截图失败：' + e.message; }
       }
-      await post(base + '/result', { ok: true, text, image, imageInfo, visible: !!visibleFrame });
+      await post(base + '/result', { ok: true, text: (device === 'mobile' ? '【手机 390×844】' : '') + text, image, imageInfo, visible: frame === visibleFrame });
     } catch (e) {
       await post(base + '/result', { ok: false, error: e.message || String(e) });
     }

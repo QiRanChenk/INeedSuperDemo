@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>门店销售看板</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="_sd/sd.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="sd-topbar">
+  <div class="sd-brand"><span class="sd-brand-logo">销</span><span id="brand">门店销售看板</span></div>
+  <div class="sd-topbar-end"><span class="sd-small sd-muted" id="asof"></span></div>
+</header>
+
+<main class="sd-page" id="page">
+  <div class="sd-page-head">
+    <div>
+      <h1>门店销售看板</h1>
+      <p>各门店销售额、订单、毛利一屏掌握，和上一周期对比，快速发现增长点与风险。</p>
+    </div>
+    <div class="sd-actions filters">
+      <div class="sd-seg" id="days">
+        <button type="button" data-value="7">近7天</button>
+        <button type="button" data-value="30" class="active">近30天</button>
+        <button type="button" data-value="90">近90天</button>
+      </div>
+      <select id="store" aria-label="门店"><option value="">全部门店</option></select>
+    </div>
+  </div>
+
+  <section class="sd-stats" id="kpis"></section>
+
+  <section class="sd-grid-2">
+    <div class="sd-card">
+      <div class="sd-card-head"><h2>销售趋势</h2><span class="sd-small sd-muted" id="trendNote"></span></div>
+      <div id="trend" data-h="240"></div>
+    </div>
+    <div class="sd-card">
+      <div class="sd-card-head"><h2>品类占比</h2><span class="sd-small sd-muted">按销售额</span></div>
+      <div id="category" data-h="200"></div>
+    </div>
+    <div class="sd-card">
+      <div class="sd-card-head"><h2>门店排行</h2><span class="sd-small sd-muted">全部门店 · 按销售额</span></div>
+      <div id="stores" data-h="240"></div>
+    </div>
+    <div class="sd-card">
+      <div class="sd-card-head"><h2>渠道构成</h2><span class="sd-small sd-muted" id="channelNote">按销售额</span></div>
+      <div id="channel" data-h="240"></div>
+    </div>
+  </section>
+
+  <section class="sd-card sd-card-flush">
+    <div class="sd-card-head"><h2>热销商品 TOP10</h2><span class="sd-small sd-muted">按销售额</span></div>
+    <div id="products"></div>
+  </section>
+
+  <section class="sd-card">
+    <div class="sd-card-head">
+      <h2>AI 解读</h2>
+      <button type="button" class="sd-btn-primary sd-btn-sm" id="insightBtn">生成解读</button>
+    </div>
+    <div id="insight" class="md"></div>
+  </section>
+</main>
+
+<script src="_sd/sd.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

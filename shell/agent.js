@@ -26,8 +26,10 @@ const TOOLS = [
     method: { type: 'string', description: 'GET / POST / PUT / DELETE …，默认 GET' }, path: { type: 'string' },
     body: { description: 'JSON 对象（自动设置 content-type）或字符串' }, headers: { type: 'object' } }, ['path']),
   tool('page_view', '查看项目页面的实际效果：返回页面结构（可点击元素带 [e数字] 编号、输入框当前值、表格、文字）和自动检查出的布局问题（横向溢出、遮挡、截断、低对比度、图片失败）；模型支持图片时附带截图。改完界面后用它确认效果', {
-    path: { type: 'string', description: '要打开的页面，相对项目根，如 "" 或 "admin.html#/orders"；不填则查看当前页面' } }),
-  tool('page_act', '像用户一样操作页面并返回操作后的页面（同 page_view）。用 page_view 返回的 ref 定位元素。用于走一遍关键业务流程：填表、提交、切换、删除等。确认框会自动点确定', {
+    path: { type: 'string', description: '要打开的页面，相对项目根，如 "" 或 "admin.html#/orders"；不填则查看当前页面' },
+    device: { type: 'string', enum: ['desktop', 'mobile'], description: '查看尺寸：desktop 电脑（默认）/ mobile 手机 390×844' } }),
+  tool('page_act', '像用户一样操作页面并返回操作后的页面（同 page_view）。用 page_view 返回的 ref 定位元素（ref 只在同一 device 下有效）。用于走一遍关键业务流程：填表、提交、切换、删除等。确认框会自动点确定', {
+    device: { type: 'string', enum: ['desktop', 'mobile'], description: '在哪个尺寸下操作，默认 desktop' },
     actions: { type: 'array', description: '按顺序执行，最多 20 步', items: { type: 'object', properties: {
       type: { type: 'string', enum: ['click', 'fill', 'select', 'check', 'press', 'scroll', 'navigate', 'wait'] },
       ref: { type: 'string', description: '元素编号，如 "e12"' },
@@ -351,7 +353,7 @@ function systemPrompt(project) {
 - 目录树: 每轮开始时以 [系统] 消息给出
 
 # 硬性规则
-1. 项目通过 sdk/ 目录获得 HTTP 路由、LLM 调用、数据源、洞察分析能力。优先使用 sdk，不要重复实现；除非用户明确要求，不要修改 sdk/ 下文件。
+1. 项目通过 sdk/ 目录获得 HTTP 路由、LLM 调用、数据库、数据源、洞察分析和前端组件库（_sd/sd.css、_sd/sd.js）。优先使用 sdk，不要重复实现；新页面一律引入组件库，用它的布局、表单、表格、弹窗、图表，自己只写少量业务样式；除非用户明确要求，不要修改 sdk/ 下文件。
 2. 前端页面中所有 URL（fetch、link、script、img）必须用相对路径，如 "api/xxx" 或 "./app.js"，禁止以 "/" 开头。项目通过反向代理在 /p/<id>/ 子路径下访问。
 3. 仅使用 Node 内置模块（node:http、node:fs 等）。确实需要第三方包时，先 run_command "npm install <pkg>"，再在代码中 import。
 4. 你改文件后壳会自动重启项目并把启动日志反馈给你；不要自己启动服务器进程。如启动失败，读日志、修复、再试。
@@ -383,6 +385,15 @@ function webErrorsSince(id, since) {
   return out;
 }
 const webErrorNote = errs => `[系统] 预览页面在浏览器中报告了 ${errs.length} 条前端错误，请排查修复：\n${errs.slice(-10).join('\n')}`;
+
+/** Sizes ('电脑' / '手机') not looked at since the last code change of this turn; empty when nothing to check. */
+function qualityGap(project, ctx) {
+  if (ctx.gateDone || !ctx.lastChangeAt || !PROJECT_TYPES[project.type]?.hasUi || ctx.noBrowserSubs != null || ctx.subs() === 0) return [];
+  const out = [];
+  if (ctx.viewedAt.desktop < ctx.lastChangeAt) out.push('电脑');
+  if (ctx.viewedAt.mobile < ctx.lastChangeAt) out.push('手机');
+  return out;
+}
 
 const NO_BROWSER = 'ERROR: 当前没有打开的 SuperDemo 页面可执行页面操作（需要用户在浏览器中打开 SuperDemo）。本轮不要再调用 page_view / page_act，改用 http_request 自测。';
 
@@ -434,6 +445,7 @@ async function execTool(project, name, args, ctx) {
       const vision = visionEnabled(getSettings());
       const r = await ctx.browser(name === 'page_view' ? 'view' : 'act', args, { vision, reload: ctx.restartedAt > ctx.browserAt });
       ctx.browserAt = Date.now();
+      if (r.ok) ctx.viewedAt[args.device === 'mobile' ? 'mobile' : 'desktop'] = Date.now();
       if (!r.ok) {
         if (r.error === 'nobrowser') { ctx.noBrowserSubs = ctx.subs(); return NO_BROWSER; }
         if (r.error === 'timeout') return 'ERROR: 页面操作超时（90 秒）';
@@ -539,7 +551,7 @@ async function runAgentInner(project, userMessage, run, sid) {
     onEvent({ type: 'restarting', files: [...ctx.changed] });
     const st = await restart(id);
     ctx.changed.clear();
-    ctx.restartedAt = Date.now();
+    ctx.restartedAt = ctx.lastChangeAt = Date.now();
     onEvent({ type: 'restarted', status: st.status });
     return st.status;
   };
@@ -549,6 +561,7 @@ async function runAgentInner(project, userMessage, run, sid) {
     browser: (op, args, opts) => requestBrowser(run, id, op, args, opts),
     subs: () => run.subs.size, noBrowserSubs: null,
     restartedAt: 0, browserAt: -1, // first page tool call of a turn reloads the page
+    viewedAt: { desktop: 0, mobile: 0 }, gateDone: false, // quality gate: look at the result before declaring done
     images: [],                    // screenshots taken in the current tool batch
     markWebSeen: () => { webSeen = Date.now(); },
   };
@@ -623,6 +636,15 @@ async function runAgentInner(project, userMessage, run, sid) {
     if (!message.tool_calls?.length) {
       // model considers itself done, but the user added something meanwhile: show the answer and go another round
       if (drain()) { if (message.content) onEvent({ type: 'text', content: message.content }); rebuild(); continue; }
+      // quality gate (once per turn): code changed for a UI project but the result was not looked at since
+      const missing = qualityGap(project, ctx);
+      if (missing.length && i < settings.maxIterations - 2) {
+        ctx.gateDone = true;
+        if (message.content) onEvent({ type: 'text', content: message.content });
+        push({ role: 'user', system: true, ts: Date.now(), content: `[系统] 收尾前请先检查实际效果：你改动后还没有在${missing.join('和')}尺寸下查看过页面。请用 page_view${missing.includes('手机') ? '（手机用 device="mobile"）' : ''}查看，发现布局问题或报错就修复；确认无误后再向用户总结。` });
+        onEvent({ type: 'gate', missing });
+        rebuild(); continue;
+      }
       finalText = message.content || ''; break;
     }
     if (message.content) onEvent({ type: 'text', content: message.content });

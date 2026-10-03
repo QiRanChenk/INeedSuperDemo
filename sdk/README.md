@@ -67,3 +67,27 @@ const { markdown, profile, usage } = await analyze({
 });   // usage: 本次 LLM 调用的 token 用量（同 llm.chat）
 ```
 `summarizeTable(table)` 纯 JS 统计画像（行数、列类型、min/max/mean、分组求和、月度趋势），analyze 内部把画像而非原始行喂给 LLM。
+
+## 前端组件库：`_sd/sd.css` + `_sd/sd.js`（SDK 自带，经 `_sd/` 提供，零依赖）
+页面统一用它，保证电脑和手机都好看。普通 HTML 元素（input / select / textarea / button / table）引入后即有样式。
+```html
+<link rel="stylesheet" href="_sd/sd.css">          <!-- 相对路径，放在自己的 style.css 之前 -->
+<script src="_sd/sd.js"></script>                   <!-- 放在自己的 app.js 之前，提供全局 sd -->
+```
+主题色：在自己的 CSS 里覆盖 `:root { --sd-brand: #0f9d58; --sd-brand-soft: #e6f4ea; }`（另有 --sd-bg / --sd-card / --sd-ink / --sd-muted / --sd-line / --sd-radius）。
+
+**布局 class**：`sd-topbar`（顶栏，含 `sd-brand` 品牌 + `sd-brand-logo` 方块图标、`sd-nav` 导航、`sd-topbar-end` 右侧区）→ `sd-page`（内容容器，`sd-page-narrow` 窄版）→ `sd-page-head`（h1 + p 说明 + `sd-actions` 按钮组）；`sd-card`（`sd-card-head` 标题行，`sd-card-flush` 无内边距，适合放表格）；`sd-grid`（自适应卡片网格）/`sd-grid-2`/`sd-grid-3`（手机自动单列）；`sd-row`、`sd-stack`、`sd-spacer`。
+**组件 class**：按钮 `sd-btn-primary` / `sd-btn-danger` / `sd-btn-ghost` / `sd-btn-sm` / `sd-btn-block`（type=submit 默认主按钮）；指标卡 `sd-stats` > `sd-stat` > `sd-stat-label` + `sd-stat-value` + `sd-stat-delta up|down`；表单 `sd-form`（两列，手机单列）> `sd-field`（label + 控件 + `sd-hint`），`sd-field-full` 占整行，必填 label 加 `sd-req`，`sd-form-actions` 按钮行；筛选栏 `sd-toolbar`，搜索框 `<div class="sd-search"><input></div>`；状态标签 `sd-tag ok|warn|danger|info|brand`；页签 `sd-tabs`、分段 `sd-seg`（子元素 `.active`）；空状态 `sd-empty`；列表 `sd-list`；`sd-muted` / `sd-small` / `sd-hide-mobile` / `sd-show-mobile`。
+
+**sd.js（全局 `sd`）**
+- `await sd.api('api/items')`、`sd.api('api/items', { body: {...} })`（自动 POST + JSON）、`{ method: 'PUT', body }`；失败抛出 Error(服务端 error 字段)
+- `sd.toast('已保存')`、`sd.toast('失败：…', 'error')`
+- `if (await sd.confirm('确定删除「张三」？', { danger: true, okText: '删除' })) …`
+- `const v = await sd.formModal({ title: '新增客户', fields: [{ name: 'name', label: '姓名', required: true }, { name: 'level', label: '等级', type: 'select', options: ['A','B','C'] }, { name: 'amount', label: '金额', type: 'number' }, { name: 'note', label: '备注', type: 'textarea' }], values: row, onSubmit: v => sd.api('api/customers', { body: v }) })` → 校验必填、提交失败时在弹窗内提示；取消返回 null。字段 type：text / number / email / tel / date / datetime-local / select / textarea / checkbox，可选 placeholder / hint / min / max / step / pattern（配 title 作为错误提示，如手机号 `pattern: '1\\d{10}', title: '请输入 11 位手机号'`）/ maxlength / inputmode / full；必填下拉默认带「请选择」空选项
+- `sd.table('#list', { columns: [{ key: 'name', label: '姓名' }, { key: 'amount', label: '金额', num: true, render: r => sd.fmt.money(r.amount) }, { key: 'status', label: '状态', render: r => sd.tag(r.status, r.status === '已完成' ? 'ok' : 'warn') }, { key: 'note', label: '备注', mobile: false }], rows, empty: '还没有客户，点右上角新增', actions: [{ text: '编辑', onClick: r => … }, { text: '删除', danger: true, onClick: r => … }], onRowClick: r => … })` → 手机上自动变成卡片（次要列加 `mobile: false` 在手机上隐藏，每张卡片保持 4–6 行；主列加 `primary: true` 作为卡片标题）；render 返回 HTML，**用户输入的文字务必 `sd.esc()`**
+- `sd.pager('#pager', { page, pageSize, total, onChange: p => … })`、`sd.tabs('#tabs', v => …)`（子元素带 data-value）
+- `sd.chart.bar('#c', { labels: ['1月','2月'], values: [120, 98] })`、排行榜用横向条 `sd.chart.bar(el, { labels, values }, { horizontal: true })`、`sd.chart.line(el, { labels, series: [{ name: '收入', values }, { name: '成本', values }] })`、`sd.chart.pie(el, { labels, values })`；可选 `{ height, format: v => sd.fmt.money(v) }`；多系列共用一根纵轴，量级差很大的指标（金额和单数）分开画
+- `sd.fmt.money(1234.5)` → ¥1,234.50、`fmt.num`、`fmt.pct(0.123)` → 12.3%（传比例）、`fmt.date`、`fmt.datetime`、`fmt.ago`（3 分钟前）
+- `sd.modal({ title, content, actions })`、`sd.busy(btn, () => sd.api(...))`（按钮转圈防重复点）、`sd.esc`、`sd.$` / `sd.$$`、`sd.debounce(fn, 300)`、`sd.formData(form)`、`sd.validate(form)`
+
+**观感要求**：首屏要有业务标题和一句说明；列表/看板必须有示例数据（启动时若表为空，插入 15–40 条贴近业务、有真实感的中文数据：人名、公司、地址、金额、日期分布合理、状态多样），不要出现"测试1""aaa"；所有空状态写清楚下一步做什么；手机宽度下不能横向滚动。

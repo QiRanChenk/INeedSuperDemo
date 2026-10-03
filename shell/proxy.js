@@ -2,7 +2,9 @@ import http from 'node:http';
 import net from 'node:net';
 import { readProject } from './registry.js';
 import { status, start } from './runner.js';
+import crypto from 'node:crypto';
 import { resolveShare, recordView } from './shares.js';
+import { addFeedback } from './feedback.js';
 
 const PATH_RE = /^\/p\/([a-z0-9-]+)(\/.*)?$/;
 const SHARE_RE = /^\/s\/([A-Za-z0-9_-]+)(\/.*)?$/;
@@ -33,37 +35,72 @@ export function shareMiddleware(req, res) {
   const project = share && readProject(share.projectId);
   if (!project) return res.status(404).send(messagePage('链接已失效', '这个分享链接不存在、已过期或已被关闭，请向分享者索取新链接。'));
   if (m[2] === undefined) return res.redirect(302, `/s/${m[1]}/`);
+  if (m[2].startsWith('/__sd/feedback')) return handleFeedback(req, res, share);
   const st = status(project.id).status;
   if (st !== 'running') {
     if (st !== 'starting') start(project.id).catch(() => {});
     return res.status(503).send(waitingPage(project, st === 'crashed' ? '暂时无法打开，正在重试…' : '正在启动，请稍候…', true));
   }
-  forward(req, res, project, m[2], { prefix: `/s/${m[1]}`, inject: false, onPage: () => recordView(share.token) });
+  // anonymous visitor id (cookie scoped to this link) for unique-visitor stats
+  const cookieName = 'sdv';
+  const existing = /(?:^|;\s*)sdv=([A-Za-z0-9_-]{8,32})/.exec(req.headers.cookie || '')?.[1];
+  const visitor = existing || crypto.randomBytes(9).toString('base64url');
+  forward(req, res, project, m[2], {
+    prefix: `/s/${m[1]}`,
+    inject: share.feedback !== false ? html => injectFeedback(html, m[1]) : false,
+    onPage: () => {
+      recordView(share.token, visitor, m[2].split('?')[0]);
+      if (!existing) res.appendHeader('set-cookie', `${cookieName}=${visitor}; Path=/s/${m[1]}/; Max-Age=31536000; SameSite=Lax; HttpOnly`);
+    },
+  });
 }
 
+// visitor feedback: POST /s/<token>/__sd/feedback { text, name, page, viewport }; at most 30 per link per hour
+const feedbackRate = new Map();
+function handleFeedback(req, res, share) {
+  if (req.method !== 'POST') return res.status(405).end();
+  const hour = Math.floor(Date.now() / 3_600_000), key = share.token + ':' + hour;
+  if ((feedbackRate.get(key) || 0) >= 30) return res.status(429).json({ error: '提交太频繁，请稍后再试' });
+  let body = '';
+  req.on('data', c => { body += c; if (body.length > 20_000) req.destroy(); });
+  req.on('end', () => {
+    try {
+      const b = JSON.parse(body || '{}');
+      addFeedback(share.projectId, { ...b, share });
+      feedbackRate.set(key, (feedbackRate.get(key) || 0) + 1);
+      if (feedbackRate.size > 1000) feedbackRate.clear();
+      res.json({ ok: true });
+    } catch (e) { res.status(400).json({ error: e.message || '提交失败' }); }
+  });
+}
+
+/** inject: true -> agent error reporter; a function html => html -> custom injection; false -> untouched. */
 function forward(req, res, project, rest, { prefix, inject, onPage }) {
   const st = status(project.id).status;
   if (st !== 'running' && st !== 'starting') {
     return res.status(503).send(waitingPage(project, st));
   }
   const headers = { ...req.headers, host: `127.0.0.1:${project.port}`, 'x-forwarded-prefix': prefix };
-  delete headers['accept-encoding']; // keep HTML uncompressed so the reporter can be injected
+  delete headers['accept-encoding']; // keep HTML uncompressed so scripts can be injected
   delete headers.authorization;      // the shell's credentials are not the project's business
   const upstream = http.request({ host: '127.0.0.1', port: project.port, method: req.method, path: rest, headers }, up => {
     const isHtml = /text\/html/i.test(up.headers['content-type'] || '') && req.method === 'GET';
-    if (isHtml && up.statusCode < 400) onPage?.();
+    const page = isHtml && up.statusCode < 400;
     if (!isHtml || !inject || up.headers['content-encoding']) {
       res.status(up.statusCode);
       for (const [k, v] of Object.entries(up.headers)) if (v !== undefined) res.setHeader(k, v);
+      if (page) onPage?.();
       return up.pipe(res);
     }
     const chunks = [];
     up.on('data', c => chunks.push(c));
     up.on('end', () => {
-      const html = injectReporter(Buffer.concat(chunks).toString('utf8'), project.id);
+      const raw = Buffer.concat(chunks).toString('utf8');
+      const html = typeof inject === 'function' ? inject(raw) : injectReporter(raw, project.id);
       res.status(up.statusCode);
       for (const [k, v] of Object.entries(up.headers)) if (v !== undefined && k !== 'content-length') res.setHeader(k, v);
       res.setHeader('content-length', Buffer.byteLength(html));
+      if (page) onPage?.();
       res.end(html);
     });
     up.on('error', () => res.end());
@@ -129,6 +166,29 @@ var xs=XMLHttpRequest.prototype.send;XMLHttpRequest.prototype.send=function(){wi
 }
 
 /** visitor: share-link wording (no internal status words). */
+/** Floating "提意见" button for share-link visitors (shadow DOM so the demo's CSS can't break it, and vice versa). */
+export function injectFeedback(html, token) {
+  const tag = `<script>${feedbackWidget(token)}</script>`;
+  const i = html.search(/<\/body>/i);
+  return i >= 0 ? html.slice(0, i) + tag + html.slice(i) : html + tag;
+}
+function feedbackWidget(token) {
+  return `(function(){if(window.__sdFb)return;window.__sdFb=1;var host=document.createElement('div');host.style.cssText='position:fixed;right:16px;bottom:16px;z-index:2147483000';
+var r=host.attachShadow({mode:'open'});r.innerHTML='<style>*{box-sizing:border-box;font:14px/1.5 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}'
++'.b{border:0;border-radius:999px;padding:10px 16px;background:#1f2430;color:#fff;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.25);opacity:.92}.b:hover{opacity:1}'
++'.p{position:absolute;right:0;bottom:52px;width:min(340px,calc(100vw - 32px));background:#fff;color:#1f2430;border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.25);padding:14px;display:none}'
++'.p.o{display:block}h4{margin:0 0 4px;font-size:15px}p{margin:0 0 10px;color:#6b7280;font-size:12px}textarea,input{width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 10px;margin-bottom:8px;resize:vertical}'
++'textarea{min-height:90px}.r{display:flex;gap:8px;justify-content:flex-end}.r button{border:1px solid #e5e7eb;background:#fff;border-radius:8px;padding:7px 14px;cursor:pointer}.r .s{background:#3b6cf6;border-color:#3b6cf6;color:#fff}.m{font-size:12px;color:#16a34a;margin-top:6px;min-height:16px}</style>'
++'<div class="p"><h4>提意见</h4><p>这个功能好不好用、还缺什么，直接写下来</p><textarea placeholder="例如：希望能按日期筛选；这里的按钮在手机上点不到"></textarea><input placeholder="怎么称呼（可选）" maxlength="40"><div class="r"><button class="c">取消</button><button class="s">提交</button></div><div class="m"></div></div><button class="b">💬 提意见</button>';
+var p=r.querySelector('.p'),t=r.querySelector('textarea'),n=r.querySelector('input'),m=r.querySelector('.m'),s=r.querySelector('.s');
+r.querySelector('.b').onclick=function(){p.classList.toggle('o');if(p.classList.contains('o'))t.focus();};r.querySelector('.c').onclick=function(){p.classList.remove('o');};
+s.onclick=function(){var v=t.value.trim();if(!v){t.focus();return;}s.disabled=true;m.style.color='#6b7280';m.textContent='提交中…';
+fetch('/s/${token}/__sd/feedback',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:v,name:n.value,page:location.pathname.replace(/^\\/s\\/[^/]+/,'')+location.hash,viewport:innerWidth+'x'+innerHeight})})
+.then(function(x){return x.json().then(function(j){if(!x.ok)throw new Error(j.error||'提交失败');});}).then(function(){t.value='';m.style.color='#16a34a';m.textContent='已收到，谢谢！';setTimeout(function(){p.classList.remove('o');m.textContent='';},1500);})
+.catch(function(e){m.style.color='#dc2626';m.textContent=e.message;}).finally(function(){s.disabled=false;});};
+(document.body||document.documentElement).appendChild(host);})();`;
+}
+
 function waitingPage(project, st, visitor = false) {
   return `<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="2"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(project.name)}</title>

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>活动报名</title>
+<link rel="stylesheet" href="_sd/sd.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="sd-topbar">
+  <a class="sd-brand" href="./"><span class="sd-brand-logo">报</span><span data-project>活动报名</span></a>
+  <nav class="sd-nav"><a class="active" href="./">报名页</a><a href="admin.html">审核台</a></nav>
+</header>
+
+<main class="sd-page sd-page-narrow">
+  <section class="hero">
+    <h1 id="evTitle">活动报名</h1>
+    <p id="evIntro"></p>
+    <div class="hero-meta">
+      <span><b>时间</b><span id="evTime"></span></span>
+      <span><b>地点</b><span id="evPlace"></span></span>
+    </div>
+  </section>
+
+  <!-- 报名表单：字段由 fields.js 的 FIELDS 渲染 -->
+  <section class="sd-card" id="formCard">
+    <div class="sd-card-head"><h2>填写报名信息</h2><span class="sd-small sd-muted">提交后 1–2 个工作日内审核</span></div>
+    <form id="form" class="sd-form" novalidate>
+      <div class="sd-form-actions"><button type="submit" class="sd-btn-block" id="submitBtn">提交报名</button></div>
+    </form>
+  </section>
+
+  <!-- 提交成功 -->
+  <section class="sd-card done" id="doneCard" hidden>
+    <div class="done-icon">✓</div>
+    <h2>报名已提交</h2>
+    <p class="sd-muted">我们会尽快完成审核。请保存下面的报名编号，凭编号和手机号可随时查询进度。</p>
+    <div class="code-box"><span id="doneCode"></span><button type="button" class="sd-btn-sm" id="copyBtn">复制</button></div>
+    <div class="sd-row done-actions">
+      <button type="button" id="againBtn">再报一位</button>
+      <button type="button" class="sd-btn-primary" id="checkBtn">查询进度</button>
+    </div>
+  </section>
+
+  <!-- 查询进度 -->
+  <section class="sd-card" id="lookupCard">
+    <div class="sd-card-head"><h2>查询报名进度</h2></div>
+    <form id="lookup" class="sd-form lookup-form" novalidate></form>
+    <div id="lookupResult"></div>
+  </section>
+</main>
+
+<script src="_sd/sd.js"></script>
+<script src="fields.js"></script>
+<script src="form.js"></script>
+</body>
+</html>

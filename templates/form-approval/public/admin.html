@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>报名审核台</title>
+<link rel="stylesheet" href="_sd/sd.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="sd-topbar">
+  <a class="sd-brand" href="./"><span class="sd-brand-logo">报</span><span data-project>活动报名</span></a>
+  <nav class="sd-nav"><a href="./">报名页</a><a class="active" href="admin.html">审核台</a></nav>
+  <div class="sd-topbar-end"><button type="button" class="sd-btn-ghost sd-btn-sm" id="reviewerBtn"></button></div>
+</header>
+
+<main class="sd-page">
+  <div class="sd-page-head">
+    <div><h1>报名审核</h1><p>逐条核对报名信息，通过或驳回；驳回需填写原因，报名人可在报名页查到。</p></div>
+    <div class="sd-actions"><a class="sd-btn" id="exportBtn" href="api/submissions/export.csv">导出名单</a></div>
+  </div>
+
+  <div class="sd-stats">
+    <div class="sd-stat"><div class="sd-stat-label">待审核</div><div class="sd-stat-value sd-warn" data-stat="待审核">—</div></div>
+    <div class="sd-stat"><div class="sd-stat-label">已通过</div><div class="sd-stat-value sd-ok" data-stat="已通过">—</div></div>
+    <div class="sd-stat"><div class="sd-stat-label">已驳回</div><div class="sd-stat-value" data-stat="已驳回">—</div></div>
+    <div class="sd-stat"><div class="sd-stat-label">今日新增</div><div class="sd-stat-value" data-stat="today">—</div></div>
+  </div>
+
+  <section class="sd-card sd-card-flush">
+    <div class="sd-tabs list-tabs" id="tabs">
+      <button type="button" data-value="待审核" class="active">待审核 <span class="count"></span></button>
+      <button type="button" data-value="已通过">已通过 <span class="count"></span></button>
+      <button type="button" data-value="已驳回">已驳回 <span class="count"></span></button>
+      <button type="button" data-value="">全部 <span class="count"></span></button>
+    </div>
+    <div class="list-body">
+      <div class="sd-toolbar"><div class="sd-search"><input id="q" type="search" placeholder="搜索姓名、手机号、单位或编号"></div></div>
+      <div id="list"></div>
+      <div id="pager"></div>
+    </div>
+  </section>
+
+  <section class="sd-card">
+    <div class="sd-card-head"><h2>各场次报名情况</h2><span class="sd-small sd-muted">到场人数按已通过的报名合计</span></div>
+    <ul class="sd-list" id="sessions"></ul>
+  </section>
+</main>
+
+<script src="_sd/sd.js"></script>
+<script src="fields.js"></script>
+<script src="admin.js"></script>
+</body>
+</html>

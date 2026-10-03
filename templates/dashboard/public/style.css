@@ -1,0 +1,20 @@
+/* 看板专属样式；通用样式来自 _sd/sd.css。换主题色：:root { --sd-brand: #0f9d58; --sd-brand-soft: #e6f4ea; } */
+.filters select { width: auto; min-width: 150px; }
+#page { transition: opacity .2s; }
+#page.is-loading .sd-stats, #page.is-loading .sd-card { opacity: .55; pointer-events: none; }
+
+/* 热销商品：商品名下方显示品类 */
+#products .sub { display: block; font-size: 12px; color: var(--sd-muted); font-weight: 400; }
+
+/* AI 解读的 Markdown 排版 */
+.md { line-height: 1.75; }
+.md h3 { font-size: 16px; margin: 18px 0 6px; } .md h4 { font-size: 15px; margin: 14px 0 4px; }
+.md > :first-child { margin-top: 0; }
+.md ul, .md ol { margin: 0 0 .75em; padding-left: 1.4em; } .md li { margin: 2px 0; }
+.md strong { color: var(--sd-ink); }
+
+@media (max-width: 720px) {
+  .sd-page-head .filters { width: 100%; }
+  .filters .sd-seg { flex: 1 1 auto; } .filters .sd-seg > * { flex: 1; }
+  .filters select { flex: 1 1 100%; }
+}

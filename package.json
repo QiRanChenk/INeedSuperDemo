@@ -5,8 +5,8 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "start": "node shell/server.js",
-    "dev": "node --watch-path=shell shell/server.js",
+    "start": "node --disable-warning=ExperimentalWarning shell/server.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch-path=shell shell/server.js",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {

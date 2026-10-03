@@ -2,10 +2,13 @@ import express from 'express';
 import path from 'node:path';
 import fs from 'node:fs';
 import { ROOT, getSettings, saveSettings, getProjectLlm, maskKey, PRESETS } from './config.js';
-import { PROJECT_TYPES, listProjects, createProject, deleteProject, readProject, writeProject, fileTree, safePath } from './registry.js';
+import { PROJECT_TYPES, SKELETONS, skeletonAvailable, listProjects, createProject, duplicateProject, deleteProject, readProject, writeProject, fileTree, safePath } from './registry.js';
+import { listFeedback, countNew, updateFeedback, deleteFeedback, feedbackToMessage } from './feedback.js';
+import { demoDataInfo, saveDemoData, restoreDemoData, setDailyReset, runDailyResets } from './demodata.js';
+import { makePlan, normalizePlan, planToMessage } from './planner.js';
 import * as runner from './runner.js';
 import { proxyMiddleware, proxyUpgrade, shareMiddleware, upgradeTarget } from './proxy.js';
-import { listShares, createShare, revokeShare, deleteSharesOf } from './shares.js';
+import { listShares, createShare, revokeShare, deleteSharesOf, setShareOptions, shareStats } from './shares.js';
 import { testConnection } from './llm.js';
 import { runAgent, attachRun, stopRun, interject, listQueue, enqueue, dequeue, clearQueue, isBusy, usageSummary, generateProjectName, getContextInfo, claimBrowser, resolveBrowser, shotPath } from './agent.js';
 import { summary as usageLogSummary, readLog, backfillIfNeeded } from './usagelog.js';
@@ -81,8 +84,17 @@ const withStatus = p => ({ ...p, ...runner.status(p.id), busy: isBusy(p.id), typ
 app.get('/api/project-types', (req, res) => res.json(Object.entries(PROJECT_TYPES).map(([id, t]) => ({ id, label: t.label, available: !!t.template }))));
 // most recently chatted first; never-chatted projects fall back to creation time
 app.get('/api/projects', (req, res) => res.json(listProjects()
-  .map(p => ({ ...withStatus(p), lastChatAt: lastChatAt(p.id) }))
+  .map(p => ({ ...withStatus(p), lastChatAt: lastChatAt(p.id), feedbackNew: countNew(p.id) }))
   .sort((a, b) => String(b.lastChatAt || b.createdAt).localeCompare(String(a.lastChatAt || a.createdAt)))));
+app.get('/api/skeletons', (req, res) => res.json(Object.entries(SKELETONS).map(([id, k]) => ({ id, label: k.label, fit: k.fit, available: skeletonAvailable(id) }))));
+// plan first: one-line request -> editable plan (nothing is created yet)
+app.post('/api/projects/plan', wrap(async (req, res) => {
+  const description = String(req.body?.description || '').trim();
+  if (!description) return res.status(400).json({ error: '请先填写「你想做什么」' });
+  const plan = await makePlan(description);
+  if (!skeletonAvailable(plan.skeleton)) plan.skeleton = 'blank';
+  res.json({ plan });
+}));
 app.post('/api/projects/name', wrap(async (req, res) => {
   const description = String(req.body?.description || '').trim();
   if (!description) return res.status(400).json({ error: '请先填写「你想做什么」' });
@@ -92,10 +104,12 @@ app.post('/api/projects', wrap(async (req, res) => {
   const body = { ...(req.body || {}) };
   body.description = String(body.description || '').trim();
   if (!body.description) return res.status(400).json({ error: '请填写「你想做什么」' });
-  body.name = String(body.name || '').trim() || await generateProjectName(body.description);
-  const p = await createProject(body);
+  // with a confirmed plan: its skeleton is used and the plan becomes the first instruction (returned as firstMessage)
+  const plan = body.plan ? normalizePlan(body.plan) : null;
+  body.name = String(body.name || plan?.name || '').trim() || await generateProjectName(body.description);
+  const p = await createProject({ name: body.name, description: body.description, type: body.type, skeleton: plan?.skeleton || body.skeleton, plan: plan || undefined });
   await runner.start(p.id);
-  res.json(withStatus(p));
+  res.json({ ...withStatus(p), firstMessage: plan ? planToMessage(plan, body.description) : `请根据以下需求改造这个项目：\n${body.description}` });
 }));
 app.get('/api/projects/:id', wrap((req, res) => {
   const p = readProject(req.params.id);
@@ -142,6 +156,37 @@ app.get('/api/projects/:id/shots/:file', wrap((req, res) => {
   res.type('image/jpeg').sendFile(f);
 }));
 
+// ---- duplicate (variant) ----
+app.post('/api/projects/:id/duplicate', wrap(async (req, res) => {
+  const p = await duplicateProject(req.params.id, req.body?.name);
+  await runner.start(p.id);
+  res.json(withStatus(p));
+}));
+
+// ---- visitor feedback ----
+app.get('/api/projects/:id/feedback', wrap((req, res) => res.json(listFeedback(req.params.id))));
+app.patch('/api/projects/:id/feedback', wrap((req, res) => res.json(updateFeedback(req.params.id, req.body?.ids || [], req.body?.status))));
+app.delete('/api/projects/:id/feedback', wrap((req, res) => res.json(deleteFeedback(req.params.id, req.body?.ids || []))));
+// selected feedback -> agent instruction (the client sends it like a normal message, then marks the items as sent)
+app.post('/api/projects/:id/feedback/message', wrap((req, res) => {
+  const set = new Set(req.body?.ids || []);
+  const items = listFeedback(req.params.id).filter(f => set.has(f.id)).reverse();
+  if (!items.length) return res.status(400).json({ error: '请先选择反馈' });
+  res.json({ message: feedbackToMessage(items) });
+}));
+
+// ---- demo data snapshot ----
+app.get('/api/projects/:id/demo-data', wrap((req, res) => res.json(demoDataInfo(req.params.id))));
+app.post('/api/projects/:id/demo-data/save', wrap(async (req, res) => {
+  if (isBusy(req.params.id)) return res.status(409).json({ error: 'AI 正在处理，请稍后再保存' });
+  res.json(await saveDemoData(req.params.id));
+}));
+app.post('/api/projects/:id/demo-data/restore', wrap(async (req, res) => {
+  if (isBusy(req.params.id)) return res.status(409).json({ error: 'AI 正在处理，请稍后再恢复' });
+  res.json(await restoreDemoData(req.params.id));
+}));
+app.put('/api/projects/:id/demo-data', wrap((req, res) => res.json(setDailyReset(req.params.id, !!req.body?.daily))));
+
 // ---- share links ----
 app.get('/api/projects/:id/shares', wrap((req, res) => res.json(listShares(req.params.id))));
 app.post('/api/projects/:id/shares', wrap(async (req, res) => {
@@ -153,6 +198,8 @@ app.post('/api/projects/:id/shares', wrap(async (req, res) => {
   res.json(share);
 }));
 app.delete('/api/projects/:id/shares/:token', wrap((req, res) => res.json(revokeShare(req.params.id, req.params.token))));
+app.patch('/api/projects/:id/shares/:token', wrap((req, res) => res.json(setShareOptions(req.params.id, req.params.token, req.body || {}))));
+app.get('/api/projects/:id/shares/:token/stats', wrap((req, res) => res.json(shareStats(req.params.token))));
 
 // ---- versions (per-turn code snapshots) ----
 app.get('/api/projects/:id/snapshots', wrap((req, res) => res.json(listSnapshots(req.params.id))));
@@ -295,6 +342,8 @@ async function boot() {
   const n = backfillIfNeeded(); if (n) console.log(`[boot] token usage log backfilled: ${n} entries`);
   const projects = listProjects();
   for (const p of projects) if (p.autoStart !== false) runner.start(p.id).catch(e => console.error(`[boot] ${p.id}:`, e.message));
+  // daily demo-data reset (checked every 10 minutes; runs once a day after 04:00 local time)
+  setInterval(() => runDailyResets(listProjects(), isBusy).catch(e => console.error('[demo-data]', e.message)), 10 * 60_000).unref();
   const server = app.listen(PORT, HOST, () => {
     const s = getSettings();
     console.log(`\n  SuperDemo 壳已启动:  http://${isLoopbackHost(HOST) ? 'localhost' : HOST}:${PORT}${passwordEnabled() ? '  (已启用访问口令)' : ''}`);

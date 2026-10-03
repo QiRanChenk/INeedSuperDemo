@@ -1,6 +1,10 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// front-end UI kit shipped with the SDK, served at _sd/ (sd.css, sd.js)
+const UI_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'ui');
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
@@ -28,7 +32,9 @@ export function createApp() {
     static(dir) { staticDir = dir; return app; },
     notFound(h) { notFound = h; return app; },
     async handle(req, res) {
-      const url = new URL(req.url, 'http://x');
+      let url;
+      try { url = new URL('http://x' + (req.url.startsWith('/') ? req.url : '/' + req.url)); } // never throws for odd paths like "//"
+      catch { res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('Bad Request'); }
       const ctx = { params: {}, query: Object.fromEntries(url.searchParams), body: undefined,
         json: (data, status = 200) => { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data)); },
         text: (s, status = 200) => { res.writeHead(status, { 'content-type': 'text/plain; charset=utf-8' }); res.end(s); },
@@ -42,6 +48,7 @@ export function createApp() {
           if (['POST', 'PUT', 'PATCH'].includes(req.method)) ctx.body = await readBody(req);
           return await r.handler(req, res, ctx);
         }
+        if (req.method === 'GET' && url.pathname.startsWith('/_sd/') && serveStatic(UI_DIR, url.pathname.slice(4), res)) return;
         if (staticDir && req.method === 'GET' && serveStatic(staticDir, url.pathname, res)) return;
         if (notFound) return await notFound(req, res, ctx);
         ctx.text('Not Found', 404);

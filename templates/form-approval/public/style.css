@@ -1,0 +1,43 @@
+/* 项目样式：只写 sd.css 之外的少量业务样式。主题色在这里改。 */
+:root { --sd-brand: #2f6bff; --sd-brand-soft: #e9efff; }
+
+/* 报名页：活动信息头图 */
+.hero { border-radius: 14px; padding: 26px 24px; color: #fff; background: linear-gradient(135deg, #2f6bff 0%, #5b4dff 55%, #8b5cf6 100%); box-shadow: 0 10px 30px rgba(47, 107, 255, .22); }
+.hero h1 { font-size: 26px; margin: 0 0 8px; }
+.hero p { margin: 0 0 16px; opacity: .92; }
+.hero-meta { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 14px; }
+.hero-meta > span { display: inline-flex; gap: 8px; align-items: center; }
+.hero-meta b { font-weight: 600; font-size: 12px; padding: 1px 8px; border-radius: 999px; background: rgba(255, 255, 255, .2); }
+
+/* 提交成功 */
+.done { text-align: center; padding: 32px 20px; }
+.done-icon { width: 56px; height: 56px; margin: 0 auto 12px; border-radius: 50%; display: grid; place-items: center; font-size: 28px; font-weight: 700; color: var(--sd-ok); background: var(--sd-ok-soft); }
+.code-box { display: inline-flex; align-items: center; gap: 12px; margin: 4px 0 18px; padding: 10px 12px 10px 18px; border: 1px dashed var(--sd-brand); border-radius: 10px; background: var(--sd-brand-soft); max-width: 100%; }
+.code-box span { font: 700 20px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .5px; color: var(--sd-brand); overflow-wrap: anywhere; }
+.done-actions { justify-content: center; }
+
+/* 查询结果 */
+.result { margin-top: 14px; padding: 14px 16px; border-radius: 10px; background: #f8f9fc; border: 1px solid var(--sd-line); display: flex; flex-direction: column; gap: 6px; }
+.result p { margin: 0; }
+.result-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.result .note { padding: 8px 10px; background: #fff; border-radius: 8px; border: 1px solid var(--sd-line); font-size: 14px; }
+#lookupResult .sd-empty { padding: 20px 8px 4px; }
+
+/* 审核台 */
+.list-tabs { padding: 0 12px; }
+.list-tabs .count { font-size: 12px; color: var(--sd-muted); font-weight: 400; }
+.list-body { padding: 14px 18px 16px; display: flex; flex-direction: column; gap: 12px; }
+#list .sd-table-wrap { border: 1px solid var(--sd-line); border-radius: 8px; }
+.sd-list .people { white-space: nowrap; } .sd-list .people b { font-size: 18px; }
+
+/* 详情弹窗：字段 - 值 */
+.kv { display: grid; grid-template-columns: 6.5em minmax(0, 1fr); gap: 8px 12px; margin: 0; font-size: 14px; }
+.kv dt { color: var(--sd-muted); } .kv dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.kv-title { margin: 18px 0 10px; padding-top: 14px; border-top: 1px solid var(--sd-line); font-size: 14px; }
+
+@media (max-width: 720px) {
+  .hero { padding: 20px 18px; } .hero h1 { font-size: 21px; }
+  .list-tabs { padding: 0 4px; }
+  .list-body { padding: 12px; }
+  #list .sd-table-wrap { border: 0; }
+}

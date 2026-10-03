@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import { DATA_DIR } from './config.js';
 
 const FILE = path.join(DATA_DIR, 'shares.json');
+const VIEWS = path.join(DATA_DIR, 'share-views.jsonl'); // one line per page view: { t, k: token, v: visitor id, p: page }
 export const TOKEN_RE = /^[A-Za-z0-9_-]{16,64}$/;
 
 function readAll() { try { return JSON.parse(fs.readFileSync(FILE, 'utf8')); } catch { return []; } }
@@ -19,7 +20,7 @@ export function listShares(projectId) {
 }
 
 /** days: number of days until expiry, 0 / empty = never. */
-export function createShare(projectId, { days, label } = {}) {
+export function createShare(projectId, { days, label, feedback = true } = {}) {
   const d = Number(days);
   const share = {
     token: crypto.randomBytes(18).toString('base64url'),
@@ -29,6 +30,7 @@ export function createShare(projectId, { days, label } = {}) {
     expiresAt: d > 0 ? Date.now() + Math.min(d, 3650) * 86_400_000 : null,
     views: 0,
     lastViewAt: null,
+    feedback: feedback !== false, // floating "提意见" button for visitors
   };
   writeAll([...readAll(), share]);
   return { ...share, active: true };
@@ -53,10 +55,40 @@ export function resolveShare(token) {
 }
 
 /** Count a page view (HTML documents only, not every asset request). */
-export function recordView(token) {
+export function recordView(token, visitor = '', page = '/') {
   const list = readAll();
   const s = list.find(x => x.token === token);
   if (!s) return;
   s.views = (s.views || 0) + 1; s.lastViewAt = Date.now();
   writeAll(list);
+  try { fs.appendFileSync(VIEWS, JSON.stringify({ t: Date.now(), k: token, v: String(visitor).slice(0, 32), p: String(page).slice(0, 120) }) + '\n'); } catch {}
+}
+
+export function setShareOptions(projectId, token, { feedback }) {
+  const list = readAll();
+  const s = list.find(x => x.token === token && x.projectId === projectId);
+  if (!s) throw new Error('链接不存在');
+  if (feedback !== undefined) s.feedback = !!feedback;
+  writeAll(list);
+  return s;
+}
+
+const dayKey = t => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+/** Visits of one link: totals, unique visitors, last `days` days, top pages. */
+export function shareStats(token, days = 14) {
+  let rows = [];
+  try { rows = fs.readFileSync(VIEWS, 'utf8').split('\n').filter(l => l.includes(token)).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(r => r && r.k === token); } catch {}
+  const byDay = new Map(), pages = new Map(), visitors = new Set();
+  for (const r of rows) {
+    visitors.add(r.v);
+    const k = dayKey(r.t), d = byDay.get(k) || { views: 0, visitors: new Set() };
+    d.views++; d.visitors.add(r.v); byDay.set(k, d);
+    pages.set(r.p, (pages.get(r.p) || 0) + 1);
+  }
+  const series = [];
+  for (let i = days - 1; i >= 0; i--) { const k = dayKey(Date.now() - i * 86_400_000), d = byDay.get(k); series.push({ date: k, views: d?.views || 0, visitors: d?.visitors.size || 0 }); }
+  return {
+    views: rows.length, visitors: visitors.size, last: rows.at(-1)?.t || null, days: series,
+    pages: [...pages].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([page, views]) => ({ page, views })),
+  };
 }

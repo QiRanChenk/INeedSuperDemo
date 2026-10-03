@@ -1,0 +1,15 @@
+/* Theme overrides + a few layout touches on top of _sd/sd.css. Change the brand colour here. */
+:root { --sd-brand: #3b6cf6; --sd-brand-soft: #eaf0ff; }
+
+/* table area inside the flush card */
+.list-body { padding: 0 0 4px; }
+
+/* detail modal: label / value grid */
+.detail { display: grid; grid-template-columns: 6em 1fr; gap: 10px 14px; margin: 0; font-size: 14px; }
+.detail dt { color: var(--sd-muted); } .detail dd { margin: 0; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+
+@media (max-width: 720px) {
+  .sd-card-flush > .sd-card-head { padding: 12px 12px 0; }
+  .list-body .sd-pager { justify-content: center; }
+  .sd-toolbar > select { flex: 1 1 40%; min-width: 0; }   /* level + sort share one row */
+}

@@ -6,10 +6,11 @@ import zlib from 'node:zlib';
 import { spawn, execFile } from 'node:child_process';
 import { projectDir, readProject } from './registry.js';
 import { getProjectLlm } from './config.js';
+import { checkpointAll } from './sqlite.js';
 
 const SKIP_DIRS = new Set(['node_modules', '.git', '.superdemo']);
 const SKIP_FILES = new Set(['.DS_Store', '.env']); // .env may hold a real API key: never ship it
-const SKIP_SUFFIXES = ['.db-wal', '.db-shm'];      // SQLite side files; the .db itself is exported
+const SKIP_SUFFIXES = ['.db-wal', '.db-shm'];      // SQLite side files: checkpointed into the .db before export
 
 export const imageTag = id => `superdemo-${id}:latest`;
 
@@ -55,6 +56,7 @@ function collectFiles(dir) {
 export function zipProject(id) {
   const project = ensureDeployFiles(id);
   const dir = projectDir(id);
+  checkpointAll(dir);
   const files = collectFiles(dir);
   const entries = files.map(rel => {
     const abs = path.join(dir, rel);
@@ -136,6 +138,7 @@ export const isBuilding = id => building.has(id);
 export function buildImage(id, onLine) {
   if (building.has(id)) return Promise.reject(new Error('该项目正在构建镜像'));
   ensureDeployFiles(id);
+  checkpointAll(projectDir(id));
   const cwd = projectDir(id), tag = imageTag(id), t0 = Date.now();
   building.add(id);
   return new Promise(resolve => {

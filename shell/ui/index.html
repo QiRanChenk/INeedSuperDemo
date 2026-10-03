@@ -33,13 +33,20 @@
     <div class="actions">
       <button id="btnToggle" class="ghost" title="启动/停止">■ 停止</button>
       <button id="btnRestart" class="ghost" title="重启">↻</button>
-      <button id="btnLogs" class="ghost" title="日志">日志</button>
-      <button id="btnFiles" class="ghost" title="文件">文件</button>
       <button id="btnVersions" class="ghost" title="每轮对话前自动保存的版本，可一键回滚">版本</button>
-      <button id="btnShare" class="ghost" title="生成分享链接：别人不用口令即可使用这个 Demo">分享</button>
-      <button id="btnExport" class="ghost" title="导出 zip / 构建 Docker 镜像">导出</button>
-      <button id="btnClear" class="ghost" title="清空对话">清空</button>
-      <button id="btnDelete" class="ghost danger" title="删除项目">删除</button>
+      <button id="btnShare" class="ghost" title="分享链接、演示数据、访问统计">分享</button>
+      <button id="btnFeedback" class="ghost" title="别人通过分享链接留下的意见">反馈<span id="fbBadge" class="nbadge" hidden></span></button>
+      <div class="more">
+        <button id="btnMore" class="ghost" title="更多">⋯</button>
+        <div id="moreMenu" class="menu" hidden>
+          <button id="btnDuplicate" class="ghost" title="复制出一个新项目来尝试另一种方案，原项目不受影响">复制项目</button>
+          <button id="btnLogs" class="ghost">运行日志</button>
+          <button id="btnFiles" class="ghost">文件</button>
+          <button id="btnExport" class="ghost">导出 / 部署</button>
+          <button id="btnClear" class="ghost">清空对话</button>
+          <button id="btnDelete" class="ghost danger">删除项目</button>
+        </div>
+      </div>
     </div>
   </header>
   <div id="sessionBar" class="sessionbar" hidden>
@@ -73,6 +80,7 @@
   <header>
     <span class="muted small" id="previewUrl">预览</span>
     <div class="actions">
+      <button id="btnDevice" class="ghost" title="切换手机 / 电脑预览">📱 手机</button>
       <button id="btnReload" class="ghost">刷新</button>
       <a id="btnOpen" class="ghost btn" target="_blank">新窗口打开 ↗</a>
     </div>
@@ -81,17 +89,31 @@
 </section>
 
 <!-- new project dialog -->
-<dialog id="dlgNew">
-  <form method="dialog" class="dlg">
-    <h3>新建项目</h3>
-    <label><span class="lbl">你想做什么？<span class="req">*</span><span class="muted">AI 会在创建后立即按此改造</span></span>
-      <textarea id="npDesc" rows="4" required placeholder="例如：一个帮销售经理看各地区业绩、找出下滑产品并给出建议的小工具"></textarea></label>
-    <label><span class="lbl">项目名称<span class="muted">可留空，AI 根据描述生成，不超过 10 字</span></span>
-      <div class="row"><input id="npName" maxlength="40" placeholder="留空自动生成"><button type="button" id="npGen" class="ghost" title="用 AI 生成名称">✨ 生成</button></div></label>
-    <label>项目类型<select id="npType"></select></label>
-    <div id="npStatus" class="small muted"></div>
-    <div class="row end"><button value="cancel" class="ghost" formnovalidate>取消</button><button id="npOk" value="ok" class="primary">创建并运行</button></div>
-  </form>
+<dialog id="dlgNew" class="plan-dlg">
+  <div class="dlg">
+    <section id="npStep1" class="dlg-step">
+      <h3>新建项目</h3>
+      <label><span class="lbl">你想做什么？<span class="req">*</span><span class="muted">一两句话就行，AI 会先出一份方案给你确认</span></span>
+        <textarea id="npDesc" rows="4" placeholder="例如：门店库存预警工具，店长录入商品和库存，低于阈值标红，AI 给补货建议"></textarea></label>
+      <label>项目类型<select id="npType"></select></label>
+      <div id="npStatus" class="small muted"></div>
+      <div class="row end"><button type="button" id="npCancel" class="ghost">取消</button><button type="button" id="npSkip" class="ghost" title="不出方案，直接按描述开始制作">跳过方案直接做</button><button type="button" id="npPlan" class="primary">生成方案</button></div>
+    </section>
+    <section id="npStep2" class="dlg-step" hidden>
+      <div class="row between"><h3>确认方案</h3><span class="muted small">按需修改，确认后 AI 开始制作</span></div>
+      <div class="row"><label class="inline">项目名称<input id="ppName" maxlength="20"></label><label class="inline">起步骨架<select id="ppSkeleton"></select></label></div>
+      <label>目标<textarea id="ppSummary" rows="2"></textarea></label>
+      <div class="pp-list" data-key="pages"><div class="pp-title">页面 <span class="muted">名称：能做什么</span></div></div>
+      <div class="pp-list" data-key="data"><div class="pp-title">数据 <span class="muted">对象：字段（必填加 *）</span></div></div>
+      <div class="pp-list" data-key="flows"><div class="pp-title">关键流程</div></div>
+      <label>示例数据<textarea id="ppSample" rows="2"></textarea></label>
+      <div class="pp-list" data-key="highlights"><div class="pp-title">演示亮点</div></div>
+      <div class="pp-list" data-key="outOfScope"><div class="pp-title">这一版先不做</div></div>
+      <label>补充说明<span class="muted small">其他要求，如配色、必须有的字段、给谁演示</span><textarea id="ppNotes" rows="2"></textarea></label>
+      <div id="ppStatus" class="small muted"></div>
+      <div class="row end"><button type="button" id="ppBack" class="ghost">← 修改需求</button><button type="button" id="ppRegen" class="ghost">重新生成</button><button type="button" id="ppOk" class="primary">确认方案，开始制作</button></div>
+    </section>
+  </div>
 </dialog>
 
 <!-- settings: modal dialog -->
@@ -186,6 +208,24 @@
     </div>
     <div id="shHint" class="small muted"></div>
     <ul id="shList" class="vslist"></ul>
+    <section class="excard">
+      <h4>演示数据</h4>
+      <div class="muted small">访客能修改 Demo 里的数据。先把整理好的数据保存为「演示初始状态」，被改乱后一键恢复，或每天凌晨自动恢复。</div>
+      <div class="row wrap"><button id="ddSave" class="ghost">保存当前数据为演示数据</button><button id="ddRestore" class="ghost">恢复演示数据</button>
+        <label class="check"><input type="checkbox" id="ddDaily"> 每天 4 点自动恢复</label></div>
+      <div id="ddInfo" class="small muted"></div>
+    </section>
+  </div>
+</dialog>
+
+<!-- visitor feedback -->
+<dialog id="dlgFeedback" class="export-dlg">
+  <div class="dlg wide">
+    <div class="row between"><h3>访客反馈 · <span id="fbName"></span></h3><button id="fbClose" class="ghost">关闭</button></div>
+    <p class="muted small" style="margin:0">别人通过分享链接点「💬 提意见」留下的反馈。勾选后可一键交给 AI 处理。</p>
+    <div class="row wrap"><label class="check"><input type="checkbox" id="fbAll"> 全选未处理</label><span class="sd-spacer" style="flex:1"></span>
+      <button id="fbSend" class="primary">交给 AI 处理所选</button><button id="fbDone" class="ghost">标为已处理</button><button id="fbDel" class="ghost danger">删除</button></div>
+    <ul id="fbList" class="vslist"></ul>
   </div>
 </dialog>
 

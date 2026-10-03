@@ -1,0 +1,7 @@
+node_modules
+.git
+.superdemo
+.env
+.DS_Store
+data/*.db-wal
+data/*.db-shm

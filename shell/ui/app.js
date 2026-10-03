@@ -137,7 +137,9 @@ async function loadUsage() {
 function renderHeader() {
   const has = !!current, busy = isBusy(current);
   const live = has && (current.status === 'running' || current.status === 'starting');
-  for (const id of ['btnToggle', 'btnLogs', 'btnFiles', 'btnVersions', 'btnShare', 'btnExport', 'btnDelete']) $('#' + id).disabled = !has;
+  for (const id of ['btnToggle', 'btnLogs', 'btnFiles', 'btnVersions', 'btnShare', 'btnFeedback', 'btnMore', 'btnDuplicate', 'btnExport', 'btnDelete']) $('#' + id).disabled = !has;
+  const fbn = has ? current.feedbackNew || 0 : 0;
+  $('#fbBadge').hidden = !fbn; $('#fbBadge').textContent = fbn;
   $('#btnRestart').disabled = !live;
   $('#btnToggle').textContent = live ? '■ 停止' : '▶ 启动';
   $('#btnToggle').classList.toggle('start', has && !live);
@@ -197,8 +199,8 @@ function addTool(pid, name, args) {
   const a = !args ? '' : name === 'http_request' ? `${args.method || 'GET'} ${args.path || ''}`
     : name === 'grep' ? `/${args.pattern || ''}/ ${args.path || ''}`
     : name === 'read_file' && args.offset ? `${args.path} :${args.offset}${args.limit ? '+' + args.limit : ''}`
-    : name === 'page_view' ? (args.path || '当前页面')
-    : name === 'page_act' ? (args.actions || []).map(a => `${a.type}${a.ref ? ' ' + a.ref : ''}${a.value != null && a.value !== '' ? ' ' + JSON.stringify(a.value).slice(0, 24) : ''}`).join(' → ')
+    : name === 'page_view' ? `${args.device === 'mobile' ? '📱 ' : ''}${args.path || '当前页面'}`
+    : name === 'page_act' ? (args.device === 'mobile' ? '📱 ' : '') + (args.actions || []).map(a => `${a.type}${a.ref ? ' ' + a.ref : ''}${a.value != null && a.value !== '' ? ' ' + JSON.stringify(a.value).slice(0, 24) : ''}`).join(' → ')
     : args.path || args.command || (args.lines ? `${args.lines} lines` : '');
   d.innerHTML = `<b>${esc(name)}</b> ${esc(typeof a === 'string' ? a : JSON.stringify(a))}`;
   return append(pid, d);
@@ -386,6 +388,7 @@ function handleEvent(pid, ev) {
     case 'snapshot': addUndo(pid, ev); break;
     case 'browser': { const projectId = String(pid).split(':')[0]; PageBot.handle(projectId, ev, current?.id === projectId && current.hasUi ? $('#frame') : null).finally(() => pageBotBusy.delete(ev.reqId)); pageBotBusy.add(ev.reqId); break; }
     case 'shot': addShot(pid, ev.file, '页面截图（' + ev.info + '）'); break;
+    case 'gate': addSys(pid, `🔍 收尾前自检：让 AI 在${ev.missing.join('和')}尺寸下检查页面`); break;
     case 'vision_off': addSys(pid, '当前模型不接受图片，已改为只发送页面结构文本（可在模型设置中调整）'); break;
     case 'web_errors': addSys(pid, `⚠ 预览页面报告了 ${ev.count} 个前端错误，已交给 AI 处理`); break;
     case 'done': finishText(pid, ev.content); if (ev.stopped) addSys(pid, '■ 已停止'); if (sameProject(pid)) reloadFrame(); break;
@@ -473,32 +476,90 @@ $('#stTest').onclick = async () => {
 $('#openSettings').onclick = async () => { await loadSettings(); toggleSettings(true); };
 $('#stClose').onclick = () => toggleSettings(false);
 
-// ---------- new project ----------
+// ---------- new project: requirement -> plan (editable) -> create + first message ----------
+let planDesc = '', skeletons = [], lastPlan = null;
+const npStep = n => { $('#npStep1').hidden = n !== 1; $('#npStep2').hidden = n !== 2; };
 $('#newProject').onclick = async () => {
-  const types = await api('/api/project-types');
+  const [types, sks] = await Promise.all([api('/api/project-types'), api('/api/skeletons')]);
+  skeletons = sks;
   const sel = $('#npType'); sel.innerHTML = '';
   for (const t of types) { const o = document.createElement('option'); o.value = t.id; o.textContent = t.label; o.disabled = !t.available; sel.appendChild(o); }
-  $('#npName').value = ''; $('#npDesc').value = ''; $('#npStatus').textContent = '';
-  $('#dlgNew').showModal(); $('#npDesc').focus();
+  $('#npDesc').value = ''; $('#npStatus').textContent = '';
+  npStep(1); $('#dlgNew').showModal(); $('#npDesc').focus();
 };
-$('#npGen').onclick = async () => {
-  const description = $('#npDesc').value.trim();
-  if (!description) { $('#npStatus').textContent = '请先填写「你想做什么」'; $('#npDesc').focus(); return; }
-  $('#npGen').disabled = true; $('#npStatus').textContent = 'AI 正在起名…';
-  try { const r = await api('/api/projects/name', { method: 'POST', body: { description } }); $('#npName').value = r.name; $('#npStatus').textContent = ''; }
-  catch (err) { $('#npStatus').textContent = '✗ ' + err.message; }
-  finally { $('#npGen').disabled = false; }
+$('#npCancel').onclick = () => $('#dlgNew').close();
+$('#npType').onchange = () => { const web = $('#npType').value === 'web'; $('#npPlan').hidden = !web; $('#npSkip').textContent = web ? '跳过方案直接做' : '创建并开始'; };
+
+// list editors for the plan: one input per item
+function ppList(key, items) {
+  const box = document.querySelector(`.pp-list[data-key="${key}"]`);
+  box.querySelectorAll('.pp-item, .pp-add').forEach(e => e.remove());
+  const add = (v = '') => {
+    const row = document.createElement('div'); row.className = 'pp-item';
+    row.innerHTML = '<input><button type="button" class="ghost" title="删除">✕</button>';
+    row.querySelector('input').value = v;
+    row.querySelector('button').onclick = () => row.remove();
+    box.insertBefore(row, btn); return row;
+  };
+  const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'ghost pp-add'; btn.textContent = '+ 添加';
+  btn.onclick = () => add().querySelector('input').focus();
+  box.appendChild(btn);
+  for (const v of items) add(v);
+}
+const ppValues = key => [...document.querySelectorAll(`.pp-list[data-key="${key}"] .pp-item input`)].map(i => i.value.trim()).filter(Boolean);
+const splitOnce = s => { const m = s.match(/^(.*?)[：:](.*)$/); return m ? [m[1].trim(), m[2].trim()] : [s.trim(), '']; };
+
+function showPlan(plan) {
+  lastPlan = plan;
+  $('#ppName').value = plan.name || '';
+  const sel = $('#ppSkeleton'); sel.innerHTML = '';
+  for (const k of skeletons) { const o = document.createElement('option'); o.value = k.id; o.textContent = k.label; o.title = k.fit; o.disabled = !k.available; sel.appendChild(o); }
+  sel.value = plan.skeleton;
+  $('#ppSummary').value = plan.summary || '';
+  ppList('pages', plan.pages.map(p => p.purpose ? `${p.name}：${p.purpose}` : p.name));
+  ppList('data', plan.data.map(d => `${d.name}：${d.fields.join('、')}`));
+  ppList('flows', plan.flows); ppList('highlights', plan.highlights); ppList('outOfScope', plan.outOfScope);
+  $('#ppSample').value = plan.sampleData || ''; $('#ppNotes').value = ''; $('#ppStatus').textContent = '';
+  npStep(2);
+}
+function readPlan() {
+  return {
+    name: $('#ppName').value.trim(), skeleton: $('#ppSkeleton').value, summary: $('#ppSummary').value.trim(),
+    users: lastPlan?.users || [], pages: ppValues('pages').map(v => { const [name, purpose] = splitOnce(v); return { name, purpose }; }),
+    data: ppValues('data').map(v => { const [name, f] = splitOnce(v); return { name, fields: f.split(/[、,，;；]/).map(x => x.trim()).filter(Boolean) }; }),
+    flows: ppValues('flows'), sampleData: $('#ppSample').value.trim(), highlights: ppValues('highlights'), outOfScope: ppValues('outOfScope'),
+    notes: $('#ppNotes').value.trim(),
+  };
+}
+async function genPlan(statusEl) {
+  const btns = ['#npPlan', '#ppRegen', '#ppOk'].map(s => $(s)); btns.forEach(b => b.disabled = true);
+  statusEl.textContent = 'AI 正在出方案（约 10–30 秒）…';
+  try { const { plan } = await api('/api/projects/plan', { method: 'POST', body: { description: planDesc } }); showPlan(plan); }
+  catch (e) { statusEl.textContent = '✗ ' + e.message; }
+  finally { btns.forEach(b => b.disabled = false); }
+}
+$('#npPlan').onclick = () => {
+  planDesc = $('#npDesc').value.trim();
+  if (!planDesc) { $('#npStatus').textContent = '请先写一句你想做什么'; $('#npDesc').focus(); return; }
+  genPlan($('#npStatus'));
 };
-$('#dlgNew form').onsubmit = async e => {
-  if (e.submitter?.value !== 'ok') return;
-  const name = $('#npName').value.trim(), description = $('#npDesc').value.trim(), type = $('#npType').value;
-  if (!description) { e.preventDefault(); $('#npStatus').textContent = '请填写「你想做什么」'; $('#npDesc').focus(); return; }
-  if (!name) $('#npStatus').textContent = 'AI 正在起名并创建项目…';
+$('#ppRegen').onclick = () => genPlan($('#ppStatus'));
+$('#ppBack').onclick = () => npStep(1);
+async function createAndStart(body, statusEl, btn) {
+  btn.disabled = true; statusEl.textContent = '正在创建项目…';
   try {
-    const p = await api('/api/projects', { method: 'POST', body: { name, description, type } });
+    const p = await api('/api/projects', { method: 'POST', body });
+    $('#dlgNew').close();
     await loadProjects(); await select(p.id);
-    send(`请根据以下需求改造这个项目：\n${description}`);
-  } catch (err) { alert(err.message); }
+    send(p.firstMessage);
+  } catch (e) { statusEl.textContent = '✗ ' + e.message; }
+  finally { btn.disabled = false; }
+}
+$('#ppOk').onclick = () => createAndStart({ description: planDesc, type: 'web', name: $('#ppName').value.trim(), plan: readPlan() }, $('#ppStatus'), $('#ppOk'));
+$('#npSkip').onclick = () => {
+  const description = $('#npDesc').value.trim();
+  if (!description) { $('#npStatus').textContent = '请先写一句你想做什么'; $('#npDesc').focus(); return; }
+  createAndStart({ description, type: $('#npType').value }, $('#npStatus'), $('#npSkip'));
 };
 
 // ---------- actions ----------
@@ -510,6 +571,13 @@ $('#btnToggle').onclick = async () => {
   finally { await loadProjects(); if (!live) reloadFrame(); }
 };
 $('#btnReload').onclick = reloadFrame;
+function setDevice(mobile) {
+  $('#preview').classList.toggle('mobile', mobile);
+  $('#btnDevice').textContent = mobile ? '💻 电脑' : '📱 手机';
+  try { localStorage.setItem('previewMobile', mobile ? '1' : '0'); } catch {}
+}
+setDevice(localStorage.getItem('previewMobile') === '1');
+$('#btnDevice').onclick = () => setDevice(!$('#preview').classList.contains('mobile'));
 $('#btnClear').onclick = async () => { if (confirm('清空当前会话的对话记录？（不影响代码，项目累计 token 保留）')) { await api(`/api/projects/${current.id}/history?session=${encodeURIComponent(currentSession || '')}`, { method: 'DELETE' }); await Promise.all([loadSessions(true), loadHistory(), loadUsage()]); } };
 $('#btnDelete').onclick = async () => {
   if (!confirm(`删除项目「${current.name}」及其全部文件？不可恢复。`)) return;
@@ -555,7 +623,16 @@ async function openShare() {
   for (const s of list) {
     const li = document.createElement('li'); li.className = s.active ? '' : 'revoked';
     const state = s.revoked ? '已关闭' : !s.active ? '已过期' : s.expiresAt ? `有效至 ${new Date(s.expiresAt).toLocaleString()}` : '永久有效';
-    li.innerHTML = `<div class="vmain"><div class="surl"></div><div class="muted small"></div></div>${s.active ? '<button class="ghost copy">复制</button><button class="ghost danger off">关闭</button>' : ''}`;
+    li.innerHTML = `<div class="vmain"><div class="surl"></div><div class="muted small"></div><div class="sstats" hidden></div></div><button class="ghost stat">统计</button>${s.active ? `<label class="check small" title="页面右下角显示「提意见」按钮"><input type="checkbox" class="fb"${s.feedback !== false ? ' checked' : ''}> 留言</label><button class="ghost copy">复制</button><button class="ghost danger off">关闭</button>` : ''}`;
+    li.querySelector('.stat').onclick = async () => {
+      const box = li.querySelector('.sstats');
+      if (!box.hidden) { box.hidden = true; return; }
+      const st = await api(`/api/projects/${id}/shares/${s.token}/stats`);
+      const max = Math.max(1, ...st.days.map(d => d.views));
+      box.innerHTML = `<span><b>${st.visitors}</b> 位访客 · <b>${st.views}</b> 次打开</span><span class="sbars" title="近 14 天每日打开次数">${st.days.map(d => `<i style="height:${Math.round(d.views / max * 100)}%" title="${d.date}：${d.views} 次 / ${d.visitors} 人"></i>`).join('')}</span>${st.pages.length ? `<span>常看页面：${st.pages.slice(0, 3).map(p => `${esc(p.page)} ×${p.views}`).join('，')}</span>` : ''}`;
+      box.hidden = false;
+    };
+    if (s.active) li.querySelector('.fb').onchange = e => api(`/api/projects/${id}/shares/${s.token}`, { method: 'PATCH', body: { feedback: e.target.checked } });
     li.querySelector('.surl').textContent = shareUrl(s.token);
     li.querySelector('.small').textContent = [s.label, state, `打开 ${s.views || 0} 次`, s.lastViewAt ? `最近 ${new Date(s.lastViewAt).toLocaleString()}` : ''].filter(Boolean).join(' · ');
     if (s.active) {
@@ -564,6 +641,7 @@ async function openShare() {
     }
     ul.appendChild(li);
   }
+  loadDemoData();
   if (!$('#dlgShare').open) $('#dlgShare').showModal();
 }
 $('#btnShare').onclick = openShare;
@@ -579,6 +657,70 @@ $('#shCreate').onclick = async () => {
   } catch (e) { alert('生成失败：' + e.message); }
   finally { btn.disabled = false; }
 };
+
+// ---------- header "more" menu ----------
+$('#btnMore').onclick = e => { e.stopPropagation(); $('#moreMenu').hidden = !$('#moreMenu').hidden; };
+document.addEventListener('click', e => { if (!e.target.closest('.more')) $('#moreMenu').hidden = true; });
+$('#moreMenu').addEventListener('click', e => { if (e.target.closest('button')) $('#moreMenu').hidden = true; });
+
+// ---------- duplicate ----------
+$('#btnDuplicate').onclick = async () => {
+  const name = prompt('新项目名称（复制代码和数据，对话记录从头开始）', `${current.name} 副本`);
+  if (name === null) return;
+  try { const p = await api(`/api/projects/${current.id}/duplicate`, { method: 'POST', body: { name: name.trim() } }); await loadProjects(); await select(p.id); }
+  catch (e) { alert('复制失败：' + e.message); }
+};
+
+// ---------- visitor feedback ----------
+let feedback = [];
+async function openFeedback() {
+  const id = current.id;
+  $('#fbName').textContent = current.name;
+  feedback = await api(`/api/projects/${id}/feedback`);
+  if (current?.id !== id) return;
+  const ul = $('#fbList'); ul.innerHTML = ''; $('#fbAll').checked = false;
+  if (!feedback.length) ul.innerHTML = '<li class="muted small">还没有反馈。生成分享链接发给别人试用，他们点页面右下角「💬 提意见」就能留言。</li>';
+  const ST = { new: '未处理', sent: '已交给 AI', done: '已处理' };
+  for (const f of feedback) {
+    const li = document.createElement('li'); li.className = 'st-' + f.status;
+    li.innerHTML = `<input type="checkbox" data-id="${esc(f.id)}"><div class="vmain"><div class="fbtext"></div><div class="muted small"></div></div>`;
+    li.querySelector('.fbtext').textContent = f.text;
+    li.querySelector('.small').textContent = [ST[f.status], new Date(f.ts).toLocaleString(), f.name, f.page && f.page !== '/' ? '页面 ' + f.page : '', f.viewport && parseInt(f.viewport) < 600 ? '📱 手机' : '', f.share?.label ? '来自链接「' + f.share.label + '」' : ''].filter(Boolean).join(' · ');
+    ul.appendChild(li);
+  }
+  if (!$('#dlgFeedback').open) $('#dlgFeedback').showModal();
+}
+const fbSelected = () => [...document.querySelectorAll('#fbList input[type=checkbox]:checked')].map(i => i.dataset.id);
+$('#fbAll').onchange = () => { for (const i of document.querySelectorAll('#fbList input[type=checkbox]')) i.checked = $('#fbAll').checked && feedback.find(f => f.id === i.dataset.id)?.status === 'new'; };
+$('#btnFeedback').onclick = openFeedback;
+$('#fbClose').onclick = () => $('#dlgFeedback').close();
+$('#fbDone').onclick = async () => { const ids = fbSelected(); if (!ids.length) return; await api(`/api/projects/${current.id}/feedback`, { method: 'PATCH', body: { ids, status: 'done' } }); openFeedback(); loadProjects(); };
+$('#fbDel').onclick = async () => { const ids = fbSelected(); if (!ids.length || !confirm(`删除 ${ids.length} 条反馈？`)) return; await api(`/api/projects/${current.id}/feedback`, { method: 'DELETE', body: { ids } }); openFeedback(); loadProjects(); };
+$('#fbSend').onclick = async () => {
+  const ids = fbSelected(); if (!ids.length) return alert('先勾选要处理的反馈');
+  const { message } = await api(`/api/projects/${current.id}/feedback/message`, { method: 'POST', body: { ids } });
+  await api(`/api/projects/${current.id}/feedback`, { method: 'PATCH', body: { ids, status: 'sent' } });
+  $('#dlgFeedback').close(); loadProjects();
+  isBusy(current) ? enqueue(message) : send(message); // busy: queued as the next turn
+};
+
+// ---------- demo data (in the share dialog) ----------
+function renderDemoData(d) {
+  $('#ddRestore').disabled = !d.saved; $('#ddDaily').disabled = !d.saved; $('#ddDaily').checked = d.daily;
+  $('#ddInfo').textContent = d.saved ? `已保存于 ${new Date(d.saved.savedAt).toLocaleString()}（${d.saved.files} 个文件）${d.lastResetAt ? ` · 上次恢复 ${new Date(d.lastResetAt).toLocaleString()}` : ''}` : '尚未保存演示数据';
+}
+async function loadDemoData() { try { renderDemoData(await api(`/api/projects/${current.id}/demo-data`)); } catch {} }
+$('#ddSave').onclick = async () => {
+  if (!confirm('把项目当前的全部数据保存为演示初始状态？（会短暂重启项目）')) return;
+  $('#ddSave').disabled = true;
+  try { renderDemoData(await api(`/api/projects/${current.id}/demo-data/save`, { method: 'POST' })); } catch (e) { alert(e.message); } finally { $('#ddSave').disabled = false; }
+};
+$('#ddRestore').onclick = async () => {
+  if (!confirm('把数据恢复到保存时的演示状态？之后新增或修改的数据会丢失。')) return;
+  $('#ddRestore').disabled = true;
+  try { renderDemoData(await api(`/api/projects/${current.id}/demo-data/restore`, { method: 'POST' })); reloadFrame(); } catch (e) { alert(e.message); } finally { $('#ddRestore').disabled = false; }
+};
+$('#ddDaily').onchange = async () => { try { renderDemoData(await api(`/api/projects/${current.id}/demo-data`, { method: 'PUT', body: { daily: $('#ddDaily').checked } })); } catch (e) { alert(e.message); } };
 
 // ---------- versions (per-turn snapshots) ----------
 /** End of a turn that changed code: offer a one-click undo right in the conversation. */

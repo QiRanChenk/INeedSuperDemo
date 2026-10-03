@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Demo</title>
+<link rel="stylesheet" href="_sd/sd.css">
+</head>
+<body>
+<header class="sd-topbar">
+  <div class="sd-brand"><span class="sd-brand-logo">D</span><span id="brand">Demo</span></div>
+</header>
+<main class="sd-page sd-page-narrow">
+  <div class="sd-page-head">
+    <div><h1 id="title">Demo</h1><p>在这里写一句话说明这个工具能帮你做什么</p></div>
+  </div>
+  <section class="sd-card">
+    <form id="noteForm" class="sd-row">
+      <div class="sd-spacer"><input name="text" placeholder="记一笔…" required></div>
+      <button type="submit">添加</button>
+    </form>
+  </section>
+  <section class="sd-card">
+    <div class="sd-card-head"><h2>最近记录</h2></div>
+    <ul id="notes" class="sd-list"></ul>
+  </section>
+</main>
+<script src="_sd/sd.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

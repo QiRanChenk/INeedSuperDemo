@@ -147,3 +147,23 @@ body.no-preview { grid-template-columns: var(--sb) 1fr; } body.no-preview #previ
 .vslist li.revoked { opacity: .5; } .vslist .surl { font: 12px ui-monospace, Menlo, monospace; word-break: break-all; color: var(--brand); }
 #dlgShare label.inline { flex: none; } #dlgShare .row { align-items: flex-end; }
 .msg.sys .shot { display: block; margin-top: 6px; max-width: 320px; max-height: 200px; border: 1px solid var(--line); border-radius: 6px; cursor: zoom-in; object-fit: cover; object-position: top; }
+
+/* new project: plan step */
+.plan-dlg { width: min(760px, 94vw); max-height: calc(100vh - 40px); overflow: auto; }
+.plan-dlg .dlg-step { display: flex; flex-direction: column; gap: 12px; }
+.pp-list { display: flex; flex-direction: column; gap: 6px; }
+.pp-title { font-size: 13px; color: var(--muted); } .pp-title .muted { font-size: 12px; margin-left: 6px; }
+.pp-item { display: flex; gap: 6px; } .pp-item input { flex: 1; font: inherit; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+.pp-item button { padding: 4px 10px; } .pp-add { align-self: flex-start; font-size: 12px; padding: 3px 10px; }
+#preview.mobile #frame { width: 390px; max-width: 100%; margin: 12px auto; height: min(844px, calc(100% - 24px)); flex: none; border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 8px 28px rgba(0,0,0,.35); }
+#preview.mobile { background: #0b0d12; }
+
+/* header: more menu, badges */
+.more { position: relative; } .menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 50; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 4px; display: flex; flex-direction: column; min-width: 140px; box-shadow: 0 10px 30px rgba(0,0,0,.4); }
+.menu button { text-align: left; border: 0; border-radius: 6px; padding: 7px 10px; } .menu button:hover:not(:disabled) { background: var(--bg); }
+.nbadge { display: inline-block; min-width: 16px; padding: 0 5px; margin-left: 4px; border-radius: 8px; background: var(--danger); color: #fff; font-size: 11px; line-height: 16px; text-align: center; }
+.vslist li .fbtext { white-space: pre-wrap; word-break: break-word; }
+.vslist li.st-sent { border-color: #3a4a6a; } .vslist li.st-done { opacity: .55; }
+.row.wrap { flex-wrap: wrap; }
+.sstats { display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 6px; }
+.sbars { display: flex; gap: 2px; align-items: flex-end; height: 32px; } .sbars i { width: 7px; background: var(--brand); border-radius: 2px 2px 0 0; min-height: 1px; opacity: .85; }
