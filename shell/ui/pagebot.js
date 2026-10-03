@@ -246,13 +246,42 @@ const PageBot = (() => {
     el.dispatchEvent(new W.Event('change', { bubbles: true }));
   }
 
+  const who = a => (a.ref ? `[${a.ref}]` : a.label ? `「${a.label}」字段` : a.text ? `「${a.text}」` : a.selector || '');
+  const norm = t => String(t || '').replace(/\s+/g, '').replace(/[*＊:：]$/, '');
+  const visibleEl = (win, el) => { const r = el.getBoundingClientRect(), cs = win.getComputedStyle(el); return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none'; };
+  /** Find by visible text (clickables) or field label (inputs); an open dialog is searched first. Exact match beats contains. */
+  function locate(win, a) {
+    const doc = win.document;
+    const dialogs = [...doc.querySelectorAll('.sd-modal-backdrop, dialog[open], [role=dialog], [aria-modal=true]')].filter(d => visibleEl(win, d));
+    const scopes = [...(dialogs.length ? [dialogs.at(-1)] : []), doc];
+    const want = norm(a.label || a.text);
+    for (const scope of scopes) {
+      let cands;
+      if (a.label) {
+        cands = [...scope.querySelectorAll('input:not([type=hidden]), select, textarea')].filter(e => visibleEl(win, e) || e.type === 'checkbox');
+        const keys = e => [nameOf(e), e.placeholder, e.getAttribute('name'), e.getAttribute('aria-label'), e.closest('.sd-field')?.querySelector('label')?.innerText].map(norm).filter(Boolean);
+        const hit = cands.find(e => keys(e).includes(want)) || cands.find(e => keys(e).some(k => k.includes(want) || want.includes(k) && k.length >= 2));
+        if (hit) return hit;
+      } else {
+        cands = [...scope.querySelectorAll(INTERACTIVE + ',[class*=chip],[class*=tab]')].filter(e => visibleEl(win, e));
+        const t = e => norm(e.innerText || e.value || e.getAttribute('aria-label') || e.title);
+        const hit = cands.find(e => t(e) === want) || cands.find(e => t(e).includes(want));
+        if (hit) return hit;
+      }
+    }
+    throw new Error(`找不到${a.label ? `名为「${a.label}」的字段` : `文字为「${a.text}」的可点击元素`}`);
+  }
+
   async function act(frame, projectId, actions, refKey = projectId + ':desktop') {
     const log = [];
+    // page (re)loaded since the last snapshot: refs are gone -> re-tag silently (numbering is deterministic per page state)
+    try { if (!frame.contentDocument.querySelector('[data-sd-ref]') && (actions || []).some(a => a.ref)) snapshot(frame); } catch {}
     for (const [i, a] of (actions || []).slice(0, 20).entries()) {
       const win = frame.contentWindow, doc = win.document;
       hookDialogs(win, log);
       const n = `${i + 1}. ${a.type}`;
       const find = () => {
+        if (!a.ref && (a.text || a.label)) return locate(win, a);
         let el = a.ref ? doc.querySelector(`[data-sd-ref="${a.ref}"]`) : a.selector ? doc.querySelector(a.selector) : null;
         // re-rendered since the snapshot (e.g. a list redrawn after a click): look it up again by tag + name
         const meta = !el && a.ref && (win.__sdRefs || window.__sdLastRefs?.[refKey])?.[a.ref];
@@ -260,17 +289,17 @@ const PageBot = (() => {
           const hits = [...doc.querySelectorAll(meta.tag)].filter(e => nameOf(e) === meta.name);
           if (hits.length === 1) { el = hits[0]; el.setAttribute('data-sd-ref', a.ref); }
         }
-        if (!el) throw new Error(`${n}: 找不到元素 ${a.ref || a.selector || '(未指定 ref)'}（页面已变化，请先 page_view 获取新的 ref）`);
+        if (!el) throw new Error(`${n}: 找不到元素 ${a.ref || a.selector || '(未指定 ref / text / label)'}（页面已变化：用返回的新页面结构里的 ref，或改用 text / label 定位）`);
         return el;
       };
       try {
-        if (a.type === 'click') { const el = find(); el.scrollIntoView({ block: 'center' }); el.focus?.(); el.click(); log.push(`${n} [${a.ref || a.selector}] 「${nameOf(el)}」`); }
-        else if (a.type === 'fill') { const el = find(); el.focus?.(); setValue(el, String(a.value ?? '')); log.push(`${n} [${a.ref || a.selector}] = "${clip(a.value, 40)}"`); }
+        if (a.type === 'click') { const el = find(); el.scrollIntoView({ block: 'center' }); el.focus?.(); el.click(); log.push(`${n} ${who(a)} 「${nameOf(el)}」`); }
+        else if (a.type === 'fill') { const el = find(); el.focus?.(); setValue(el, String(a.value ?? '')); log.push(`${n} ${who(a)} = "${clip(a.value, 40)}"`); }
         else if (a.type === 'select') {
           const el = find(); const opt = [...el.options].find(o => o.value === String(a.value) || o.text.trim() === String(a.value).trim());
           if (!opt) throw new Error(`${n}: 下拉中没有选项 "${a.value}"`);
-          setValue(el, opt.value); log.push(`${n} [${a.ref || a.selector}] 选择 "${opt.text.trim()}"`);
-        } else if (a.type === 'check') { const el = find(); if (el.checked !== (a.value !== false)) el.click(); log.push(`${n} [${a.ref || a.selector}] ${a.value !== false ? '勾选' : '取消勾选'}`); }
+          setValue(el, opt.value); log.push(`${n} ${who(a)} 选择 "${opt.text.trim()}"`);
+        } else if (a.type === 'check') { const el = find(); if (el.checked !== (a.value !== false)) el.click(); log.push(`${n} ${who(a)} ${a.value !== false ? '勾选' : '取消勾选'}`); }
         else if (a.type === 'press') {
           const el = doc.activeElement || doc.body, key = a.value || 'Enter';
           for (const t of ['keydown', 'keypress', 'keyup']) el.dispatchEvent(new win.KeyboardEvent(t, { key, bubbles: true, cancelable: true }));

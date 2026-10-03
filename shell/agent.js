@@ -28,11 +28,13 @@ const TOOLS = [
   tool('page_view', '查看项目页面的实际效果：返回页面结构（可点击元素带 [e数字] 编号、输入框当前值、表格、文字）和自动检查出的布局问题（横向溢出、遮挡、截断、低对比度、图片失败）；模型支持图片时附带截图。改完界面后用它确认效果', {
     path: { type: 'string', description: '要打开的页面，相对项目根，如 "" 或 "admin.html#/orders"；不填则查看当前页面' },
     device: { type: 'string', enum: ['desktop', 'mobile'], description: '查看尺寸：desktop 电脑（默认）/ mobile 手机 390×844' } }),
-  tool('page_act', '像用户一样操作页面并返回操作后的页面（同 page_view）。用 page_view 返回的 ref 定位元素（ref 只在同一 device 下有效）。用于走一遍关键业务流程：填表、提交、切换、删除等。确认框会自动点确定', {
+  tool('page_act', '像用户一样操作页面并返回操作后的页面（同 page_view）。定位元素用 page_view 返回的 ref，或用 text（按钮文字）/ label（字段名）——点开弹窗后再填表时，弹窗里的字段还没有 ref，请用 label 定位，这样一次调用就能完成「点新增 → 填表 → 保存」。确认框会自动点确定', {
     device: { type: 'string', enum: ['desktop', 'mobile'], description: '在哪个尺寸下操作，默认 desktop' },
     actions: { type: 'array', description: '按顺序执行，最多 20 步', items: { type: 'object', properties: {
       type: { type: 'string', enum: ['click', 'fill', 'select', 'check', 'press', 'scroll', 'navigate', 'wait'] },
-      ref: { type: 'string', description: '元素编号，如 "e12"' },
+      ref: { type: 'string', description: '元素编号，如 "e12"（来自最近一次返回的页面结构）' },
+      text: { type: 'string', description: '不知道 ref 时按可见文字定位（按钮、链接、选项卡等），如 "保存"；有弹窗时优先在弹窗内找' },
+      label: { type: 'string', description: '不知道 ref 时按字段名定位输入框/下拉框（标签、占位文字或 name），如 "商品名称"' },
       value: { description: 'fill 的文字 / select 的选项值或文字 / check 的 true|false / press 的按键名 / navigate 的路径 / wait 的毫秒' } }, required: ['type'] } } }, ['actions']),
   tool('run_command', '在项目根目录执行 shell 命令（如 npm install xxx），60 秒超时。不要用它查看或修改文件、也不要用 curl 测接口——用对应工具', { command: { type: 'string' } }, ['command']),
   tool('get_logs', '获取项目最近的运行日志：[out]/[err] 为服务端输出，[web] 为预览页面在浏览器里的报错', { lines: { type: 'integer', description: '默认 60' } }),
@@ -360,13 +362,15 @@ function systemPrompt(project) {
 5. 查看与修改文件只用文件工具：
    - 改已有文件用 edit_file（old_string 逐字一致且唯一）；只有新建文件或大面积重写才用 write_file。
    - 大文件先 grep 定位，再用 read_file 的 offset/limit 读相关片段；修改前务必看过要改的原文。
+   - 下方 SDK 文档已完整说明用法，不要去读 sdk/ 下的源码（包括 sd.js / sd.css），直接按文档使用；只有怀疑 SDK 本身有问题时才读。
    - 禁止用 run_command 执行 node -e / sed / python / cat / grep 等来查看或改文件。
    - 写入 .js 文件后会自动做语法检查，结果附在工具返回里；有语法错误先修复。
-6. 自测：接口用 http_request（不要用 curl，不要 sleep 等待）；有界面的改动完成后，用 page_view 看实际页面，再用 page_act 按用户的方式走一遍关键流程（录入、提交、查看结果），确认没有报错、布局正常、数据正确，发现问题就修复后再看。get_logs 里的 [web] 行是预览页面在浏览器中的报错，需要修复。
-7. 项目要能独立部署：不要依赖壳的任何文件，只依赖项目目录内内容和环境变量。
-8. 数据存储必须是真数据库：任何需要保存的数据（表单、用户、订单、配置、上传数据集等）都必须通过 sdk 的 openDb()（SQLite，文件 data/app.db）建表存取，禁止用内存变量、全局数组或 JSON 文件充当数据库。用 db.ensureTable 在启动时建表，读写用 db.query / db.insert / db.run。上传文件等运行时数据放在 data/ 下。
-9. 面向用户的界面绝不暴露技术栈与技术细节：页面文字、提示、页脚、空状态、状态栏中禁止出现 SQLite、数据库、数据表、表名、Node、SDK、API、JSON、接口、端口、文件路径、模型名等词汇；一律用业务语言（如"已保存"而非"已写入数据库"，"历史记录"而非"analyses 表"）。用户是业务人员，不是开发者。技术说明只写在 README 或代码注释里。
-10. 过程中的说明与最终回复都用中文。全部完成后，用简短中文向用户说明：改了哪些文件、新增了什么能力、如何验证。不要输出整段代码。
+6. 项目里调用 AI（llm.complete / completeJSON）时：提示词精简、只给必要的数据摘要，设 maxTokens；AI 失败或超时时要有兜底（如规则计算的结果）并给用户友好提示。AI 接口单次可能要 10–30 秒，自测一次跑通即可，不要反复调。
+7. 自测：接口用 http_request（不要用 curl，不要 sleep 等待）；有界面的改动完成后，用 page_view 看实际页面，再用 page_act 按用户的方式走一遍关键流程（录入、提交、查看结果），确认没有报错、布局正常、数据正确，发现问题就修复后再看。get_logs 里的 [web] 行是预览页面在浏览器中的报错，需要修复。
+8. 项目要能独立部署：不要依赖壳的任何文件，只依赖项目目录内内容和环境变量。
+9. 数据存储必须是真数据库：任何需要保存的数据（表单、用户、订单、配置、上传数据集等）都必须通过 sdk 的 openDb()（SQLite，文件 data/app.db）建表存取，禁止用内存变量、全局数组或 JSON 文件充当数据库。用 db.ensureTable 在启动时建表，读写用 db.query / db.insert / db.run。上传文件等运行时数据放在 data/ 下。
+10. 面向用户的界面绝不暴露技术栈与技术细节：页面文字、提示、页脚、空状态、状态栏中禁止出现 SQLite、数据库、数据表、表名、Node、SDK、API、JSON、接口、端口、文件路径、模型名等词汇；一律用业务语言（如"已保存"而非"已写入数据库"，"历史记录"而非"analyses 表"）。用户是业务人员，不是开发者。技术说明只写在 README 或代码注释里。
+11. 过程中的说明与最终回复都用中文。全部完成后，用简短中文向用户说明：改了哪些文件、新增了什么能力、如何验证。不要输出整段代码。
 
 # SDK 文档
 ${sdkDoc}`;
@@ -601,6 +605,14 @@ async function runAgentInner(project, userMessage, run, sid) {
     const web = webErrorsSince(id, webSeen);
     webSeen = Date.now();
     if (web.length && i > 0) { push({ role: 'user', content: webErrorNote(web), ts: Date.now(), system: true }); onEvent({ type: 'web_errors', count: web.length }); rebuild(); }
+    // budget: tell the model before it runs out, so it ends with something usable and a summary
+    const left = settings.maxIterations - i;
+    if (i > 0 && (left === Math.max(3, Math.round(settings.maxIterations * 0.2)) || left === 2)) {
+      push({ role: 'user', system: true, ts: Date.now(), content: left === 2
+        ? '[系统] 只剩最后 2 步：不要再改代码，确认项目能正常启动后，直接向用户总结已完成的内容、怎么演示、还没做完的部分。'
+        : `[系统] 本轮还剩 ${left} 步。请收尾：优先保证已做的页面和核心流程可用，不要再开新功能；剩余部分在总结里说明。` });
+      rebuild();
+    }
     onEvent({ type: 'thinking', iteration: i + 1 });
     let r;
     const call = () => {
