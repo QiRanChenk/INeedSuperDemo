@@ -637,12 +637,23 @@ async function copyText(text) {
     document.body.appendChild(ta); ta.select(); const ok = document.execCommand('copy'); ta.remove(); return ok;
   }
 }
+/** A ready-to-send invite: what it is, the link, how long it takes, how to give feedback. */
+function inviteText(url) {
+  const plan = current.plan || {}, what = plan.summary || current.description || current.name;
+  return `嗨～我在琢磨一个小想法：${what.replace(/。$/, '')}。做了个能点的 Demo，想请你花 2 分钟试一下（手机也能打开）：\n${url}\n试完点页面右下角「💬 说说看法」，告诉我对你有没有用、还缺什么就行，谢谢🙏`;
+}
+function showInvite(token) {
+  const box = $('#shInviteBox'); if (!token) { box.hidden = true; return; }
+  $('#shInvite').value = inviteText(shareUrl(token)); box.hidden = false;
+}
+$('#shInviteCopy').onclick = async e => { e.target.textContent = await copyText($('#shInvite').value) ? '已复制' : '复制失败'; setTimeout(() => { e.target.textContent = '复制话术'; }, 1500); };
 async function openShare() {
   const id = current.id;
   $('#shName').textContent = current.name;
   $('#shHint').textContent = /^(localhost|127\.|\[::1\])/.test(location.hostname) ? '⚠ 你正通过本机地址访问，生成的链接只在这台电脑上能打开；请部署到服务器 / NAS 后再分享。' : '';
   const list = await api(`/api/projects/${id}/shares`);
   if (current?.id !== id) return;
+  showInvite(list.find(x => x.active)?.token);
   const ul = $('#shList'); ul.innerHTML = '';
   if (!list.length) ul.innerHTML = '<li class="muted small">还没有分享链接。</li>';
   for (const s of list) {
@@ -907,6 +918,7 @@ async function openReport() {
   renderReport(report, ev);
   if (!$('#dlgReport').open) $('#dlgReport').showModal();
 }
+let lastReport = null;
 function renderReport(report, ev) {
   const r = ev.reactions;
   $('#rpStats').innerHTML = [['访客', ev.visitors], ['👍 有用', r.up], ['🤔 一般', r.meh], ['👎 用不上', r.down]].map(([k, v]) => `<div><span class="muted small">${k}</span><b>${v}</b></div>`).join('');
@@ -922,9 +934,16 @@ function renderReport(report, ev) {
   if (!report && !ev.feedback) html += `<div class="muted small">还没有反馈。点「分享给目标用户」生成链接发出去，试用者在页面右下角就能表态、回答验证问题。</div>`;
   $('#rpBody').innerHTML = html;
   $('#rpGen').disabled = !ev.feedback; $('#rpInfo').textContent = '';
+  lastReport = report; $('#rpIterate').hidden = !report || !(report.next.length || report.concerns.length);
 }
 $('#btnReport').onclick = openReport;
 $('#rpClose').onclick = () => $('#dlgReport').close();
+$('#rpIterate').onclick = () => {
+  const r = lastReport; if (!r) return;
+  const msg = `根据试用验证的结论改出第二版 Demo，用来做下一轮验证。\n结论：${VERDICT_NAMES[r.verdict]}——${r.summary}\n${r.concerns.length ? `试用者的顾虑：\n${r.concerns.map(x => '- ' + x).join('\n')}\n` : ''}建议的下一步：\n${r.next.map(x => '- ' + x).join('\n')}\n请只做能在 Demo 里体现、帮助下一轮验证的改动（不能在 Demo 里验证的，如线下调研，写进总结里提醒我）；保持验证版的轻量，改完在电脑和手机上各看一次。`;
+  $('#dlgReport').close();
+  isBusy(current) ? enqueue(msg) : send(msg, { budget: FIRST_BUILD_BUDGET });
+};
 $('#rpShare').onclick = () => { $('#dlgReport').close(); openShare(); };
 $('#rpGen').onclick = async () => {
   const b = $('#rpGen'); b.disabled = true; $('#rpInfo').textContent = 'AI 正在根据证据写结论…';

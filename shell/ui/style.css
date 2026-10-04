@@ -238,3 +238,4 @@ body.view-board #chat, body.view-board #preview { display: none !important; } bo
   .rp-stats { grid-template-columns: repeat(2, 1fr); }
 }
 .icard .shot:empty { } .icard .shot.none { height: 44px; font-size: 16px; }
+.verdict { white-space: nowrap; flex: none; }
