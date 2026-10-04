@@ -427,7 +427,8 @@ async function execTool(project, name, args, ctx) {
       return fileTree(id, args.path || '.').join('\n') || '(empty)';
     case 'read_file':
       if (isSdkPath(args.path) && !args.force && !/README\.md$/i.test(args.path)) return SDK_SOURCE_NOTE;
-      return readText(safePath(id, args.path), args.path, args);
+      // the confirmed design sketch is read whole in one call (it's the reference for the first build)
+      return readText(safePath(id, args.path), args.path, { ...args, max: /^(\.\/)?sketch\.html$/.test(String(args.path).trim()) ? 90000 : undefined });
     case 'write_file': {
       const abs = safePath(id, args.path);
       fs.mkdirSync(path.dirname(abs), { recursive: true });

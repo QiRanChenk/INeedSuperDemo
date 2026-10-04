@@ -107,7 +107,7 @@ app.post('/api/projects/name', wrap(async (req, res) => {
 // design sketch of one direction of a plan (static HTML, shown sandboxed; sd.css served from the shell for it)
 app.use('/_sd', express.static(path.join(SDK_DIR, 'ui')));
 app.post('/api/projects/sketch', wrap(async (req, res) => {
-  res.json({ html: await makeSketch(req.body?.plan || {}, Number(req.body?.index) || 0, req.body?.description || '') });
+  res.json(await makeSketch(req.body?.plan || {}, Number(req.body?.index) || 0, req.body?.description || ''));
 }));
 app.post('/api/projects', wrap(async (req, res) => {
   const body = { ...(req.body || {}) };
@@ -120,7 +120,7 @@ app.post('/api/projects', wrap(async (req, res) => {
   const sketch = plan && body.sketch ? cleanSketch(body.sketch) : '';
   if (sketch) fs.writeFileSync(path.join(projectDir(p.id), 'sketch.html'), sketch);
   await runner.start(p.id);
-  const sketchNote = sketch ? '\n\n## 已确认的设计草图\n用户看过并选定了核心页面的静态草图，存在项目根目录 sketch.html（不对外提供）。先 read_file 看一遍，核心页面照它的布局、专属元素和视觉做（可以直接拿它的结构和样式改成真实页面：示例数据改为来自接口、按钮接上功能）；草图里画了但方案没要求的入口和细节不要做（导航只保留方案里的页面）。' : '';
+  const sketchNote = sketch ? `\n\n## 已确认的设计草图\n用户看过并选定了核心页面的静态草图（${body.sketchDevice === 'mobile' ? '按手机尺寸画的，电脑上可以居中或适当放宽' : '按电脑尺寸画的，手机上按组件库的响应式方式收起'}），存在项目根目录 sketch.html（不对外提供）。先 read_file 看一遍，核心页面照它的布局、专属元素和视觉做（可以直接拿它的结构和样式改成真实页面：示例数据改为来自接口、按钮接上功能）；草图里画了但方案没要求的入口和细节不要做（导航只保留方案里的页面）。` : '';
   res.json({ ...withStatus(p), firstMessage: plan ? planToMessage(plan, body.description) + sketchNote : `请根据以下需求改造这个项目：\n${body.description}` });
 }));
 app.get('/api/projects/:id', wrap((req, res) => {

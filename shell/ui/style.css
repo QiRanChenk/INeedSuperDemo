@@ -251,3 +251,5 @@ body.view-board #chat, body.view-board #preview { display: none !important; } bo
 .pp-sk.loading { display: grid; place-items: center; background: var(--bg); color: var(--muted); cursor: default; font-size: 12px; }
 #dlgSketch { width: min(1320px, 94vw); max-width: none; max-height: 96vh; } .sk-dlg { width: auto; }
 #skFrame { flex: none; width: 100%; height: min(820px, 80vh); border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.pp-sk iframe.m { width: 390px; height: 844px; }
+#skFrame.m { width: 390px; height: min(844px, 80vh); display: block; margin: 0 auto; }

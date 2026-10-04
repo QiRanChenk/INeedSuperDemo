@@ -98,7 +98,7 @@
         <textarea id="npDesc" rows="4" placeholder="例如：门店库存预警工具，店长录入商品和库存，低于阈值标红，AI 给补货建议"></textarea></label>
       <label>项目类型<select id="npType"></select></label>
       <div id="npStatus" class="small muted"></div>
-      <div class="row end"><button type="button" id="npCancel" class="ghost">取消</button><button type="button" id="npSkip" class="ghost" title="不出方案，直接按描述开始制作">跳过方案直接做</button><button type="button" id="npPlan" class="primary">生成方案</button></div>
+      <div class="row end"><button type="button" id="npCancel" class="ghost">取消</button><button type="button" id="npSkip" class="ghost" title="不出方案，直接按描述开始制作">跳过方案直接做</button><button type="button" id="npAuto" class="ghost" title="全自动：出方案 → 按推荐方向画草图并制作 → AI 模拟试用 → 按意见改一版（约 15–20 分钟，不用盯着；保持这个页面打开）">⚡ 一键到底</button><button type="button" id="npPlan" class="primary">生成方案</button></div>
     </section>
     <section id="npStep2" class="dlg-step" hidden>
       <div class="row between"><h3>确认方案</h3><span class="muted small">按需修改，确认后 AI 开始制作</span></div>

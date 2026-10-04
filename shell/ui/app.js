@@ -395,7 +395,7 @@ function handleEvent(pid, ev) {
     case 'gate': addSys(pid, `🔍 收尾前自检：${[ev.leftover?.length && `清理没改过的骨架页（${ev.leftover.join('、')}）`, ev.missing?.length && `在${ev.missing.join('和')}尺寸下检查页面`].filter(Boolean).join('；')}`); break;
     case 'vision_off': addSys(pid, '当前模型不接受图片，已改为只发送页面结构文本（可在模型设置中调整）'); break;
     case 'web_errors': addSys(pid, `⚠ 预览页面报告了 ${ev.count} 个前端错误，已交给 AI 处理`); break;
-    case 'done': finishText(pid, ev.content); if (ev.stopped) addSys(pid, '■ 已停止'); if (sameProject(pid)) reloadFrame(); if (!ev.stopped) nudgePretest(pid); break;
+    case 'done': finishText(pid, ev.content); if (ev.stopped) addSys(pid, '■ 已停止'); if (sameProject(pid)) reloadFrame(); lastDone.set(String(pid).split(':')[0], ev); if (!ev.stopped) nudgePretest(pid); break;
     case 'error': addMsg(pid, 'error', ev.message); break;
   }
 }
@@ -555,14 +555,17 @@ async function sketchDoc(html) {
   sdCss ??= await fetch('/_sd/sd.css').then(r => r.text()).catch(() => '');
   return html.replace(/<link[^>]*_sd\/sd\.css[^>]*>/i, () => `<style>${sdCss}</style>`);
 }
-async function showSketchThumb(card, html) {
+async function showSketchThumb(card, sk) { // sk = { html, device }
+  const { html, device } = sk, mobile = device === 'mobile';
   card.querySelector('.pp-sk')?.remove();
   const wrap = document.createElement('div'); wrap.className = 'pp-sk'; wrap.title = '点击放大';
   const f = document.createElement('iframe'); f.setAttribute('sandbox', ''); f.tabIndex = -1; f.srcdoc = await sketchDoc(html);
   wrap.appendChild(f); card.insertBefore(wrap, card.firstChild);
-  const fit = () => { f.style.transform = `scale(${wrap.clientWidth / 1280})`; };
+  if (mobile) f.classList.add('m');
+  // desktop: 1280 wide fills the card; phone: 390×844 scaled to the card height, centred
+  const fit = () => { const k = mobile ? wrap.clientHeight / 844 : wrap.clientWidth / 1280; f.style.transform = `scale(${k})`; f.style.left = mobile ? `${(wrap.clientWidth - 390 * k) / 2}px` : '0'; };
   fit(); new ResizeObserver(fit).observe(wrap);
-  wrap.onclick = async e => { e.stopPropagation(); card.click(); $('#skFrame').srcdoc = await sketchDoc(html); $('#skTitle').textContent = card.querySelector('b').textContent; $('#dlgSketch').showModal(); };
+  wrap.onclick = async e => { e.stopPropagation(); card.click(); $('#skFrame').classList.toggle('m', mobile); $('#skFrame').srcdoc = await sketchDoc(html); $('#skTitle').textContent = card.querySelector('b').textContent; $('#dlgSketch').showModal(); };
 }
 $('#skClose').onclick = () => $('#dlgSketch').close();
 $('#ppSketch').onclick = async () => {
@@ -576,9 +579,9 @@ $('#ppSketch').onclick = async () => {
     card.querySelector('.pp-sk')?.remove();
     card.insertAdjacentHTML('afterbegin', '<div class="pp-sk loading">绘制中…</div>');
     try {
-      const { html } = await api('/api/projects/sketch', { method: 'POST', body: { plan: { ...current, design: i }, index: i, description: planDesc } });
+      const sk = await api('/api/projects/sketch', { method: 'POST', body: { plan: { ...current, design: i }, index: i, description: planDesc } });
       if (lastPlan !== plan) return;
-      plan.sketches[i] = html; await showSketchThumb(card, html);
+      plan.sketches[i] = sk; await showSketchThumb(card, sk);
     } catch (e) { fail++; const l = card.querySelector('.pp-sk.loading'); if (l) l.textContent = '✗ ' + e.message; }
   }));
   if (lastPlan === plan) $('#ppStatus').textContent = fail ? `${fail} 张草图失败，可以再点一次` : '草图好了：点开放大对比，选中的那张会交给 AI 照着做';
@@ -608,6 +611,57 @@ $('#npPlan').onclick = () => {
   genPlan($('#npStatus'));
 };
 $('#ppRegen').onclick = () => genPlan($('#ppStatus'));
+
+// ---------- autopilot: one sentence -> plan -> sketch -> build -> simulated users -> one round of fixes ----------
+const lastDone = new Map(), autopiloting = new Set();
+const FIX_BUDGET = 30; // pre-test fixes are small by design; an out-of-steps turn still ends with a summary
+$('#npAuto').onclick = async () => {
+  const description = $('#npDesc').value.trim(), st = $('#npStatus');
+  if (!description) { st.textContent = '请先写一句你想做什么'; $('#npDesc').focus(); return; }
+  const btns = ['#npAuto', '#npPlan', '#npSkip'].map(x => $(x)); btns.forEach(b => b.disabled = true);
+  let p;
+  try {
+    st.textContent = '1/5 出方案…';
+    const { plan } = await api('/api/projects/plan', { method: 'POST', body: { description } });
+    let sk = null;
+    if (plan.designs?.length) {
+      st.textContent = `2/5 按推荐方向「${plan.designs[0].name}」画草图…`;
+      try { sk = await api('/api/projects/sketch', { method: 'POST', body: { plan, index: 0, description } }); } catch {} // a sketch is a bonus
+    }
+    p = await api('/api/projects', { method: 'POST', body: { description, type: 'web', name: plan.name, plan, sketch: sk?.html || '', sketchDevice: sk?.device || '' } });
+    $('#dlgNew').close();
+    await loadProjects(); await select(p.id);
+  } catch (e) { st.textContent = '✗ ' + e.message; return; }
+  finally { btns.forEach(b => b.disabled = false); }
+  autopiloting.add(p.id);
+  const say = t => { if (current?.id === p.id) addSys(viewKey(), '⚡ 一键到底 · ' + t); };
+  const stopped = () => current?.id !== p.id || lastDone.get(p.id)?.stopped;
+  // send() returns when this tab's stream ends; if the stream dropped, the run may still be going on the server
+  const run = async (msg, budget) => {
+    lastDone.delete(p.id);
+    await send(msg, { budget });
+    for (let k = 0; k < 400; k++) { await loadProjects(); if (!projects.find(x => x.id === p.id)?.busy) break; await new Promise(r => setTimeout(r, 3000)); }
+  };
+  try {
+    say('3/5 按方案和草图制作（约 6–8 分钟）');
+    await run(p.firstMessage, FIRST_BUILD_BUDGET);
+    if (stopped()) return say('已中断：切换了项目或手动停止，后面的步骤可以在「📊 验证」里手动做');
+    say('4/5 AI 模拟试用：先走一遍核心流程，再让 4 位模拟用户挑毛病');
+    const t = await runPretest(p.id, () => {});
+    if (stopped()) return;
+    const tally = t.personas.reduce((a, x) => (a[x.reaction]++, a), { up: 0, meh: 0, down: 0 });
+    say(`模拟试用结果：👍${tally.up} 🤔${tally.meh} 👎${tally.down}${t.fixes.length ? '，按建议改一版' : '，没有必须改的'}`);
+    if (t.fixes.length) {
+      say('5/5 按模拟用户的意见修改');
+      await run(pretestFixMessage(t), FIX_BUDGET);
+      if (stopped()) return;
+    }
+    const d = addSys(viewKey(), '✅ 一键到底完成：Demo 做好了，也替你挑过一轮毛病。下一步把它发给真实的目标用户，收集他们的看法。');
+    const b = document.createElement('button'); b.className = 'ghost small'; b.style.marginLeft = '8px'; b.textContent = '🔗 生成分享链接';
+    b.onclick = () => openShare(); d.appendChild(b);
+  } catch (e) { say('出错了：' + e.message + '（可以在「📊 验证」里手动继续）'); }
+  finally { autopiloting.delete(p.id); }
+};
 $('#ppBack').onclick = () => npStep(1);
 async function createAndStart(body, statusEl, btn) {
   btn.disabled = true; statusEl.textContent = '正在创建项目…';
@@ -619,7 +673,7 @@ async function createAndStart(body, statusEl, btn) {
   } catch (e) { statusEl.textContent = '✗ ' + e.message; }
   finally { btn.disabled = false; }
 }
-$('#ppOk').onclick = () => createAndStart({ description: planDesc, type: 'web', name: $('#ppName').value.trim(), plan: readPlan(), sketch: lastPlan?.sketches?.[planDesign] || '' }, $('#ppStatus'), $('#ppOk'));
+$('#ppOk').onclick = () => createAndStart({ description: planDesc, type: 'web', name: $('#ppName').value.trim(), plan: readPlan(), sketch: lastPlan?.sketches?.[planDesign]?.html || '', sketchDevice: lastPlan?.sketches?.[planDesign]?.device || '' }, $('#ppStatus'), $('#ppOk'));
 $('#npSkip').onclick = () => {
   const description = $('#npDesc').value.trim();
   if (!description) { $('#npStatus').textContent = '请先写一句你想做什么'; $('#npDesc').focus(); return; }
@@ -994,6 +1048,7 @@ $('#rpGen').onclick = async () => {
 /** After a build turn of an idea that hasn't been tried by anyone yet (no pre-test, no share): suggest the next step. */
 function nudgePretest(key) { // key = view key "<projectId>:<session>"
   const pid = String(key).split(':')[0], p = projects.find(x => x.id === pid), v = p?.validation;
+  if (autopiloting.has(pid)) return;
   if (!p?.plan || !v || v.pretest || v.shares || v.feedback) return;
   const d = addSys(key, '下一步：发给真人之前，可以先让 4 位模拟用户试一遍，挑出看不懂、不可信的地方（约 1 分钟）。');
   const b = document.createElement('button'); b.className = 'ghost small'; b.textContent = '🧪 AI 模拟试用';
@@ -1019,27 +1074,33 @@ function renderPretest(t) {
     ${t.fixes.length ? `<div class="lbl">分享前建议先改</div><ul>${li(t.fixes)}</ul><div class="row end"><button id="rpPreFix" class="ghost">让 AI 先改这些</button></div>` : ''}`;
   const fix = $('#rpPreFix');
   if (fix) fix.onclick = () => {
-    const msg = `分享给真人试用前，先按 AI 模拟试用发现的问题改一下 Demo（模拟用户的意见只作参考，你判断不合理的可以不改，说明原因）。\n${t.confusions.length ? `容易看不懂的地方：\n${t.confusions.map(x => '- ' + x).join('\n')}\n` : ''}建议先改：\n${t.fixes.map(x => '- ' + x).join('\n')}\n保持验证版的轻量，只改这些；需要新页面的，只做能演示那一下的最小版本；改完在电脑和手机上各看一次。`;
+    const msg = pretestFixMessage(t);
     $('#dlgReport').close();
-    isBusy(current) ? enqueue(msg) : send(msg, { budget: FIRST_BUILD_BUDGET });
+    isBusy(current) ? enqueue(msg) : send(msg, { budget: FIX_BUDGET });
   };
 }
+/** Capture pages, walk the core flow, run the simulated users. info(text) reports progress. */
+async function runPretest(id, info = () => {}) {
+  info('正在打开各页面…');
+  const { pages } = await api(`/api/projects/${id}/pretest`);
+  const snaps = await PageBot.capture(id, pages);
+  info('规划并走一遍核心流程…');
+  let walks = [];
+  try {
+    const plan = await api(`/api/projects/${id}/pretest/walks`, { method: 'POST', body: { pages: snaps } });
+    walks = await PageBot.walk(id, plan.walks || [], (goal, text) => api(`/api/projects/${id}/pretest/continue`, { method: 'POST', body: { goal, text } }).then(r => r.actions || []));
+  } catch {} // without walkthroughs the pre-test falls back to the agent's own page_act runs
+  info(`4 位模拟用户正在试用 ${snaps.length} 个页面…`);
+  const { pretest } = await api(`/api/projects/${id}/pretest`, { method: 'POST', body: { pages: snaps, walks } });
+  loadProjects();
+  return pretest;
+}
+const pretestFixMessage = t => `分享给真人试用前，先按 AI 模拟试用发现的问题改一下 Demo（模拟用户的意见只作参考，你判断不合理的可以不改，说明原因）。\n${t.confusions.length ? `容易看不懂的地方：\n${t.confusions.map(x => '- ' + x).join('\n')}\n` : ''}建议先改：\n${t.fixes.map(x => '- ' + x).join('\n')}\n保持验证版的轻量，只改这些；需要新页面的，只做能演示那一下的最小版本；改完在电脑和手机上各看一次。`;
 $('#rpPretest').onclick = async () => {
   const id = current.id, b = $('#rpPretest'); b.disabled = true;
   try {
     if (current.status !== 'running') throw new Error('项目没在运行：先启动再试');
-    $('#rpInfo').textContent = '正在打开各页面…';
-    const { pages } = await api(`/api/projects/${id}/pretest`);
-    const snaps = await PageBot.capture(id, pages);
-    $('#rpInfo').textContent = '规划并走一遍核心流程…';
-    let walks = [];
-    try {
-      const plan = await api(`/api/projects/${id}/pretest/walks`, { method: 'POST', body: { pages: snaps } });
-      walks = await PageBot.walk(id, plan.walks || [], (goal, text) => api(`/api/projects/${id}/pretest/continue`, { method: 'POST', body: { goal, text } }).then(r => r.actions || []));
-    } catch {} // without walkthroughs the pre-test falls back to the agent's own page_act runs
-    $('#rpInfo').textContent = `4 位模拟用户正在试用 ${snaps.length} 个页面…`;
-    const { pretest } = await api(`/api/projects/${id}/pretest`, { method: 'POST', body: { pages: snaps, walks } });
-    loadProjects();
+    const pretest = await runPretest(id, t => { $('#rpInfo').textContent = t; });
     if (current?.id === id) { renderPretest(pretest); $('#rpInfo').textContent = ''; $('#rpPre').scrollIntoView({ behavior: 'smooth', block: 'start' }); }
   } catch (e) { $('#rpInfo').textContent = '✗ ' + e.message; }
   finally { b.disabled = false; }

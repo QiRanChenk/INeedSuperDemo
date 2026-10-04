@@ -7,13 +7,13 @@ import { execFile } from 'node:child_process';
 const READ_LIMIT = 60_000;
 
 /** Whole file, or lines [offset, offset+limit) (1-based) with a header so the model knows where it is. */
-export function readText(abs, rel, { offset, limit } = {}) {
+export function readText(abs, rel, { offset, limit, max = READ_LIMIT } = {}) {
   if (!fs.existsSync(abs)) return `ERROR: 文件不存在 ${rel}`;
   if (fs.statSync(abs).isDirectory()) return `ERROR: ${rel} 是目录，请用 list_files`;
   const txt = fs.readFileSync(abs, 'utf8');
   if (!offset && !limit) {
-    if (txt.length <= READ_LIMIT) return txt;
-    const shown = txt.slice(0, READ_LIMIT), n = shown.split('\n').length;
+    if (txt.length <= max) return txt;
+    const shown = txt.slice(0, max), n = shown.split('\n').length;
     return `${shown}\n...(文件过长已截断：共 ${txt.split('\n').length} 行，只显示到约第 ${n} 行；用 offset/limit 分段读取，或先 grep 定位)`;
   }
   const lines = txt.split('\n');

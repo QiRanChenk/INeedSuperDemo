@@ -27,6 +27,7 @@ export async function makeSketch(rawPlan, index = 0, description = '') {
   const plan = normalizePlan(rawPlan);
   const d = plan.designs[index];
   if (!d) throw new Error('没有这个设计方向');
+  const mobile = d.layout.split('+').includes('tabbar'); // phone-first direction: draw it at phone size
   const brief = [
     `想法：${String(description).slice(0, 1000)}`, plan.summary && `目标：${plan.summary}`, plan.hypothesis && `要验证的假设：${plan.hypothesis}`,
     plan.users.length && `使用者：${plan.users.join('、')}`,
@@ -39,7 +40,7 @@ export async function makeSketch(rawPlan, index = 0, description = '') {
   ].filter(Boolean).join('\n');
   // gateways' output moderation occasionally trips on realistic sample data (names, phone numbers, medical values): retry once
   const call = () => chat({ thinking: false, temperature: 0.7, messages: [
-    { role: 'system', content: `你是顶尖的产品界面设计师。为一个「验证用 Demo」画核心页面（第一个页面）的静态高保真草图：一个完整的 HTML 文档，电脑宽屏下的样子，让人一眼看出这是哪个行业、给谁用、价值在哪。
+    { role: 'system', content: `你是顶尖的产品界面设计师。为一个「验证用 Demo」画核心页面（第一个页面）的静态高保真草图：一个完整的 HTML 文档，${mobile ? '手机竖屏（宽 390px）下的样子，底部标签栏导航' : '电脑宽屏下的样子'}，让人一眼看出这是哪个行业、给谁用、价值在哪。
 要求：
 - <head> 里只引入 <link rel="stylesheet" href="_sd/sd.css">，再加一个 <style> 写这个方向专属的样式；不要 <script>、不要外部字体/图片/CDN（图标用 emoji 或 CSS 画）。
 - 用组件库的类（下面的文档）搭骨架，按设计方向定布局和气质，专属元素要做得像真的；不要套「标题 + 4 指标卡 + 表格」的固定模式，除非它确实是最好的表达。
@@ -56,5 +57,5 @@ ${kit()}` },
   if (u) logUsage({ p: '_planning', i: u.input, o: u.output, c: u.cached });
   const html = cleanSketch(r.message.content);
   if (!/<body/i.test(html)) throw new Error('草图生成失败，请重试');
-  return html;
+  return { html, device: mobile ? 'mobile' : 'desktop' };
 }
