@@ -49,7 +49,10 @@ function pages(id) {
       const html = fs.readFileSync(path.join(dir, f), 'utf8');
       const title = (html.match(/<title>([^<]*)<\/title>/i) || [])[1] || '';
       const h1 = ((html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) || [])[1] || '').replace(/<[^>]+>/g, '').trim();
-      out.push(`${f === 'index.html' ? '（首页）' : f}：${[title, h1].filter(Boolean).join(' / ')}`);
+      // real wording on the page (static part): section titles and buttons, so steps can quote them exactly
+      const texts = re => [...html.matchAll(re)].map(m => m[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()).filter(t => t && t.length <= 20);
+      const words = [...new Set([...texts(/<h[2-3][^>]*>([\s\S]*?)<\/h[2-3]>/gi), ...texts(/<button[^>]*>([\s\S]*?)<\/button>/gi), ...texts(/<a[^>]*>([\s\S]*?)<\/a>/gi)])].slice(0, 25);
+      out.push(`${f === 'index.html' ? '（首页）' : f}：${[title, h1].filter(Boolean).join(' / ')}${words.length ? `\n  页面上的字：${words.join('、')}` : ''}`);
     }
   } catch {}
   return out;
@@ -67,7 +70,7 @@ export async function generateTour(id) {
     `页面：\n${pages(id).join('\n') || '（只有首页）'}`,
   ].filter(Boolean).join('\n\n');
   const r = await chat({ thinking: false, temperature: 0.4, messages: [
-    { role: 'system', content: `你为一个 Web Demo 写「访客导览」：第一次打开的人看到一张小卡片，按步骤体验最有价值的功能。只输出 JSON：{"title":"不超过12字","intro":"一句话说明这个 Demo 帮谁解决什么，不超过40字","steps":[{"text":"动作 + 能看到什么，不超过40字，如：在「库存总览」看哪些商品标红缺货","page":"对应页面文件名，如 dashboard.html；首页留空"}]}，3-5 步，按体验顺序，用业务语言，不提技术。` },
+    { role: 'system', content: `你为一个 Web Demo 写「访客导览」：第一次打开的人看到一张小卡片，按步骤体验最有价值的功能。只输出 JSON：{"title":"不超过12字","intro":"一句话说明这个 Demo 帮谁解决什么，不超过40字","steps":[{"text":"动作 + 能看到什么，不超过40字，如：在「库存总览」看哪些商品标红缺货","page":"对应页面文件名，如 dashboard.html；首页留空"}]}，3-5 步，按体验顺序，用业务语言，不提技术。提到页面上的区块、按钮时只用「页面上的字」里出现过的原文，不要自己起名；不要写具体数字和人名（页面数据会变），说「看哪样卖得最好」而不是「豆角卖了 12 斤」。` },
     { role: 'user', content: context },
   ] });
   const u = normalizeUsage(r.usage);

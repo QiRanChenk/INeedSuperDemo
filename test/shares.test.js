@@ -29,3 +29,12 @@ test('shareStats separates views, actions and visible time', () => {
     fs.writeFileSync(f, fs.readFileSync(f, 'utf8').split('\n').filter(l => l && !l.includes(tok)).join('\n') + '\n');
   }
 });
+
+test('normPublicUrl keeps http(s) origins (+ path), drops the rest', async () => {
+  const { normPublicUrl } = await import('../shell/config.js');
+  assert.equal(normPublicUrl('https://demo.example.com/'), 'https://demo.example.com');
+  assert.equal(normPublicUrl('http://1.2.3.4:18788'), 'http://1.2.3.4:18788');
+  assert.equal(normPublicUrl('https://x.com/sd/'), 'https://x.com/sd');
+  assert.equal(normPublicUrl('demo.example.com'), '');
+  assert.equal(normPublicUrl('javascript:alert(1)'), '');
+});

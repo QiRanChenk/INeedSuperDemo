@@ -33,6 +33,11 @@ function readSettingsFile() {
   try { return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); } catch { return {}; }
 }
 
+/** "https://demo.example.com/" -> "https://demo.example.com"; anything that isn't an http(s) origin -> ''. */
+export function normPublicUrl(v) {
+  try { const u = new URL(String(v || '').trim()); return /^https?:$/.test(u.protocol) ? (u.origin + u.pathname).replace(/\/+$/, '') : ''; } catch { return ''; }
+}
+
 /** Effective LLM settings: UI settings file overrides env. */
 export function getSettings() {
   const s = readSettingsFile();
@@ -49,6 +54,8 @@ export function getSettings() {
     vision: ['auto', 'on', 'off'].includes(s.vision) ? s.vision : 'auto',
     visionOk: typeof s.visionOk === 'boolean' ? s.visionOk : null, // auto-detected support of the current model
     visionError: s.visionError || '', // provider message that switched screenshots off
+    // address that share links use (domain / tunnel), when the owner reaches SuperDemo over a LAN address
+    publicUrl: normPublicUrl(s.publicUrl ?? process.env.SUPERDEMO_PUBLIC_URL ?? ''),
     // build agent reasoning: on = provider default (gateways often think by default), off = switch it off (much faster)
     agentThinking: ['on', 'off'].includes(s.agentThinking) ? s.agentThinking : 'on',
     // LLM used INSIDE generated projects (env SUPERDEMO_LLM_*). useShell=true -> same as the shell agent.

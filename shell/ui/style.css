@@ -324,3 +324,4 @@ table.cmp .sim { color: #a78bfa; }
 .bcol-more { width: 100%; margin-top: 4px; }
 /* plan dialog: the confirm buttons stay reachable while scrolling a long plan */
 #npStep2 > .row.end { position: sticky; bottom: -20px; background: var(--panel); padding: 10px 0; z-index: 2; border-top: 1px solid var(--line); }
+.tag-bug { background: rgba(245,158,11,.16); color: #f59e0b; border-radius: 6px; padding: 0 6px; font-size: 12px; }

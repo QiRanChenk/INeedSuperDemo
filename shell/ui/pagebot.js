@@ -273,7 +273,7 @@ const PageBot = (() => {
   }
 
   async function act(frame, projectId, actions, refKey = projectId + ':desktop') {
-    const log = [];
+    const log = []; let clickedSig = null;
     // page (re)loaded since the last snapshot: refs are gone -> re-tag silently (numbering is deterministic per page state)
     try { if (!frame.contentDocument.querySelector('[data-sd-ref]') && (actions || []).some(a => a.ref)) snapshot(frame); } catch {}
     for (const [i, a] of (actions || []).slice(0, 20).entries()) {
@@ -293,7 +293,7 @@ const PageBot = (() => {
         return el;
       };
       try {
-        if (a.type === 'click') { const el = find(); el.scrollIntoView({ block: 'center' }); el.focus?.(); el.click(); log.push(`${n} ${who(a)} 「${nameOf(el)}」`); }
+        if (a.type === 'click') { const el = find(); el.scrollIntoView({ block: 'center' }); el.focus?.(); clickedSig = pageSig(frame); el.click(); log.push(`${n} ${who(a)} 「${nameOf(el)}」`); }
         else if (a.type === 'fill') { const el = find(); el.focus?.(); setValue(el, String(a.value ?? '')); log.push(`${n} ${who(a)} = "${clip(a.value, 40)}"`); }
         else if (a.type === 'select') {
           const el = find(); const opt = [...el.options].find(o => o.value === String(a.value) || o.text.trim() === String(a.value).trim());
@@ -313,8 +313,20 @@ const PageBot = (() => {
       await sleep(120);
       await waitIdle(frame, 6000);
       try { unhookDialogs(win); } catch {}
+      // a click that changed nothing is usually a broken button ("保存" that doesn't save): say so, the agent and the
+      // pre-test both read this log
+      if (clickedSig != null) { if (pageSig(frame) === clickedSig) log[log.length - 1] += '（点击后页面没有任何变化）'; clickedSig = null; }
     }
     return log;
+  }
+  /** Cheap fingerprint of the rendered page (markup incl. classes + form values). */
+  function pageSig(frame) {
+    try {
+      const d = frame.contentDocument; let h = 5381;
+      const str = d.body.innerHTML + [...d.querySelectorAll('input,textarea,select')].map(e => e.value).join('|');
+      for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+      return d.location.href + ':' + str.length + ':' + h;
+    } catch { return null; }
   }
 
   // ---------- entry ----------

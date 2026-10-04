@@ -461,6 +461,7 @@ async function loadSettings() {
   $('#stKey').placeholder = settings.hasKey ? `已配置 ${settings.apiKey}（留空保持不变）` : 'sk-…';
   $('#stTemp').value = settings.temperature; $('#stIter').value = settings.maxIterations; $('#stCtx').value = settings.contextWindow; $('#stStream').checked = settings.stream !== false;
   $('#stVision').value = settings.vision || 'auto';
+  $('#stPublic').value = settings.publicUrl || '';
   $('#stVisionState').textContent = settings.vision === 'auto' ? (settings.visionOk === true ? '已检测：当前模型支持图片' : settings.visionOk === false ? `已检测：当前模型不支持图片，只发送页面结构文本${settings.visionError ? `（${settings.visionError.slice(0, 120)}）` : ''}；如判断有误，把上面切到「总是发送」或重新保存即可重新检测` : '尚未检测（AI 第一次查看页面时自动判断）') : '';
   // project-side LLM
   const pl = settings.projectLlm;
@@ -496,7 +497,7 @@ function toggleSettings(open) {
 }
 $('#stDev').onchange = e => { setDev(e.target.checked); renderHeader(); };
 async function saveSettings() {
-  const body = { baseUrl: $('#stBase').value, model: $('#stModel').value, temperature: $('#stTemp').value, maxIterations: $('#stIter').value, contextWindow: $('#stCtx').value, stream: $('#stStream').checked, vision: $('#stVision').value, projectLlm: collectProjectLlm() };
+  const body = { baseUrl: $('#stBase').value, model: $('#stModel').value, temperature: $('#stTemp').value, maxIterations: $('#stIter').value, contextWindow: $('#stCtx').value, stream: $('#stStream').checked, vision: $('#stVision').value, publicUrl: $('#stPublic').value, projectLlm: collectProjectLlm() };
   if ($('#stKey').value) body.apiKey = $('#stKey').value;
   const saved = await api('/api/settings', { method: 'PUT', body });
   await loadSettings();
@@ -794,7 +795,7 @@ $('#btnFiles').onclick = async () => {
 $('#panelClose').onclick = () => $('#dlgPanel').close();
 
 // ---------- share links ----------
-const shareUrl = token => `${location.origin}/s/${token}/`;
+const shareUrl = token => `${settings?.publicUrl || location.origin}/s/${token}/`;
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); return true; }
   catch { // http:// on a LAN address is not a secure context: no Clipboard API
@@ -815,9 +816,13 @@ $('#shInviteCopy').onclick = async e => { e.target.textContent = await copyText(
 async function openShare() {
   const id = current.id;
   $('#shName').textContent = current.name;
-  const local = /^(localhost|127\.|\[::1\])/.test(location.hostname);
-  $('#shHint').textContent = local ? '⚠ 你正通过本机地址访问：生成的链接只在这台电脑上能打开，发给别人是打不开的。请部署到服务器 / NAS，从那里打开 SuperDemo 再分享。' : '';
-  $('#shHint').classList.toggle('warn-box', local);
+  const h = location.hostname, pub = settings?.publicUrl;
+  const local = !pub && /^(localhost|127\.|\[::1\])/.test(h);
+  const lan = !pub && /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|[^.]+\.local$)/.test(h);
+  $('#shHint').textContent = local ? '⚠ 你正通过本机地址访问：生成的链接只在这台电脑上能打开，发给别人是打不开的。请部署到服务器 / NAS，从那里打开 SuperDemo 再分享。'
+    : lan ? '⚠ 你正通过局域网地址访问：链接只有同一个 Wi-Fi / 内网里的人能打开。要发给外面的人，请在「模型设置」里填「分享链接的公网地址」（域名或内网穿透地址）。'
+    : pub ? `分享链接使用公网地址：${pub}` : '';
+  $('#shHint').classList.toggle('warn-box', local || lan);
   const list = await api(`/api/projects/${id}/shares`);
   if (current?.id !== id) return;
   showInvite(list.find(x => x.active)?.token);
@@ -892,6 +897,7 @@ async function openFeedback() {
     const suspicious = /(run_command|\.env|api[_ -]?key|环境变量|密钥|cat\s+\/|rm\s+-rf|忽略(之前|以上)的?(指令|要求)|ignore (all|previous))/i.test([f.text, ...(f.answers || []).map(a => a.a)].join(' '));
     li.querySelector('.fbtext').textContent = [f.reaction && RX[f.reaction], f.text, ...(f.answers || []).map(a => `（${a.q} → ${a.a}）`)].filter(Boolean).join('  ');
     if (suspicious) li.querySelector('.fbtext').insertAdjacentHTML('afterbegin', '<span class="tag-sus" title="内容像是在让 AI 执行命令或读取密钥：交给 AI 时会被忽略">⚠ 可疑</span> ');
+    if (f.bug) li.querySelector('.fbtext').insertAdjacentHTML('afterbegin', '<span class="tag-bug" title="访客报告 Demo 有地方坏了：勾选后交给 AI 修">🐞 出错</span> ');
     li.querySelector('.small').textContent = [ST[f.status], new Date(f.ts).toLocaleString(), f.name, f.contact ? '📇 想内测：' + f.contact : '', f.page && f.page !== '/' ? '页面 ' + f.page : '', f.viewport && parseInt(f.viewport) < 600 ? '📱 手机' : '', f.share?.label ? '来自链接「' + f.share.label + '」' : ''].filter(Boolean).join(' · ');
     ul.appendChild(li);
   }
@@ -1212,6 +1218,7 @@ function renderReport(report, ev) {
   // how far the evidence is from a stable conclusion (≥ 5 people who reacted)
   const reacted = r.up + r.meh + r.down;
   if (ev.feedback && reacted < 5) $('#rpInfo').textContent = `已有 ${reacted} 人表态，再收集 ${5 - reacted} 人，结论会更可信`;
+  if (ev.bugs?.length) $('#rpInfo').textContent = `🐞 有 ${ev.bugs.length} 位访客报告 Demo 出错：先在「反馈」里勾选交给 AI 修好，不然大家评价的是 bug，不是想法`;
   // the verdict is a snapshot: say so when evidence kept coming in afterwards
   const newFb = report ? ev.feedback - (report.stats.feedback || 0) : 0, newVis = report ? ev.visitors - (report.stats.visitors || 0) : 0;
   if (newFb > 0 || newVis > 0) $('#rpInfo').textContent = `⚠ 结论生成后又来了 ${[newVis > 0 && `${newVis} 位访客`, newFb > 0 && `${newFb} 条反馈`].filter(Boolean).join('、')}，点「生成 / 更新结论」更新`;

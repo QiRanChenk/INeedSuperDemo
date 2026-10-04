@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'node:path';
 import fs from 'node:fs';
-import { ROOT, SDK_DIR, getSettings, saveSettings, getProjectLlm, maskKey, PRESETS } from './config.js';
+import { ROOT, SDK_DIR, normPublicUrl, getSettings, saveSettings, getProjectLlm, maskKey, PRESETS } from './config.js';
 import { PROJECT_TYPES, SKELETONS, skeletonAvailable, listProjects, createProject, duplicateProject, deleteProject, readProject, writeProject, fileTree, safePath, projectDir } from './registry.js';
 import { listFeedback, countNew, updateFeedback, deleteFeedback, feedbackToMessage } from './feedback.js';
 import { demoDataInfo, saveDemoData, restoreDemoData, setDailyReset, runDailyResets } from './demodata.js';
@@ -45,7 +45,7 @@ const publicSettings = s => ({
 });
 app.get('/api/settings', (req, res) => res.json({ ...publicSettings(getSettings()), presets: PRESETS }));
 app.put('/api/settings', wrap(async (req, res) => {
-  const { baseUrl, apiKey, model, temperature, maxIterations, contextWindow, stream, projectLlm, vision, agentThinking } = req.body || {};
+  const { baseUrl, apiKey, model, temperature, maxIterations, contextWindow, stream, projectLlm, vision, agentThinking, publicUrl } = req.body || {};
   const before = JSON.stringify(getProjectLlm());
   const patch = {};
   if (projectLlm && typeof projectLlm === 'object') {
@@ -66,6 +66,7 @@ app.put('/api/settings', wrap(async (req, res) => {
   if (stream !== undefined) patch.stream = !!stream;
   if (['auto', 'on', 'off'].includes(vision)) patch.vision = vision;
   if (['on', 'off'].includes(agentThinking)) patch.agentThinking = agentThinking;
+  if (publicUrl !== undefined) { const u = normPublicUrl(publicUrl); if (String(publicUrl).trim() && !u) return res.status(400).json({ error: '分享地址要以 http:// 或 https:// 开头，如 https://demo.example.com' }); patch.publicUrl = u; }
   // model / endpoint / vision mode changed -> image support has to be detected again
   const cur = getSettings();
   if ((patch.vision && patch.vision !== cur.vision) || (patch.model && patch.model !== cur.model) || (patch.baseUrl && patch.baseUrl !== cur.baseUrl)) { patch.visionOk = null; patch.visionError = ''; }

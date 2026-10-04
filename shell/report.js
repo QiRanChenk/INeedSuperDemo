@@ -56,7 +56,7 @@ export function evidence(id) {
   return {
     views, visitors, actors, timed, medianMs: medians.length ? medians.sort((a, b) => a - b)[Math.floor(medians.length / 2)] : null,
     actions: [...actions].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([action, count]) => ({ action, count })),
-    inputs: inputs.slice(-20), contacts: fb.filter(f => f.contact).length, groups, links: shares.length, reactions, answers, feedback: fb.length, texts: fb.filter(f => f.text).map(f => f.text),
+    bugs: fb.filter(f => f.bug).map(f => f.text).filter(Boolean), inputs: inputs.slice(-20), contacts: fb.filter(f => f.contact).length, groups, links: shares.length, reactions, answers, feedback: fb.length, texts: fb.filter(f => f.text && !f.bug).map(f => f.text),
   };
 }
 
@@ -82,6 +82,7 @@ export async function makeReport(id) {
     ev.groups.length > 1 && `分组（不同分享链接）：\n${ev.groups.map(g => `- ${g.label}：${g.visitors} 人访问、${g.actors} 人动手、👍${g.reactions.up} 🤔${g.reactions.meh} 👎${g.reactions.down}`).join('\n')}`,
     `表态：${Object.entries(ev.reactions).map(([k, v]) => `${REACTIONS[k]} ${v}`).join('，')}`,
     ev.inputs.length && `访客在 Demo 里实际录入的内容（看是像真实业务、还是随手测试）：\n${ev.inputs.map(x => '- ' + x).join('\n')}`,
+    ev.bugs.length && `⚠ 有 ${ev.bugs.length} 条是在报告 Demo 出错（这些访客的体验和表态可能被 bug 影响，结论里要说明，并建议先修好再继续验证）：\n${ev.bugs.slice(0, 10).map(t => '- ' + t.replace(/\s+/g, ' ').slice(0, 200)).join('\n')}`,
     roundNote(id),
     ev.contacts && `${ev.contacts} 人主动留下联系方式，希望上线后第一时间用上（比表态更强的意愿信号）`,
     ...Object.entries(ev.answers).map(([q, as]) => `问题「${q}」的回答：\n${as.slice(0, 30).map(a => '- ' + a).join('\n')}`),
