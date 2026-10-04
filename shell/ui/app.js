@@ -801,7 +801,7 @@ $('#panelClose').onclick = () => $('#dlgPanel').close();
 // ---------- share links ----------
 // share links: the demo origin's public address; else the shell's public address (reachable from outside, but same
 // origin as the shell); else the demo origin as seen from here; else this origin
-const shareUrl = token => `${settings?.demoUrl || settings?.publicUrl || PageBot.origin() || location.origin}/s/${token}/`;
+const shareUrl = token => `${settings?.demoUrl || (/^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(location.hostname) && settings?.publicUrl ? settings.publicUrl : PageBot.origin()) || settings?.publicUrl || location.origin}/s/${token}/`;
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); return true; }
   catch { // http:// on a LAN address is not a secure context: no Clipboard API
@@ -1338,6 +1338,7 @@ document.addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && !e.s
   UsageDialog.refreshSummary();
   setInterval(() => UsageDialog.refreshSummary(), 60000);
   await loadSettings();
+  PageBot.init(); // find the demo origin early (and remember a public one)
   await loadProjects();
   const start = location.hash.match(/^#\/p\/(\w+)/)?.[1];
   if (start && projects.some(p => p.id === start)) await select(start); else showBoard(); // home = idea board (or the project in the address)

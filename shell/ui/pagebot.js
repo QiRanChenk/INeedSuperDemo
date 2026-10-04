@@ -19,10 +19,17 @@ const PageBot = (() => {
   async function init() {
     if (demoBase !== null) return demoBase;
     const s = typeof settings !== 'undefined' ? settings : null;
-    const cand = s?.demoUrl || (s?.demoPort ? `${location.protocol}//${location.hostname}:${s.demoPort}` : '');
-    let ok = false;
-    if (cand) { try { await fetch(cand + '/__sd/ping', { mode: 'no-cors', cache: 'no-store', signal: AbortSignal.timeout(3000) }); ok = true; } catch {} }
-    demoBase = ok ? cand : '';
+    // candidates: the configured address; this address with port + 1 (a reverse proxy usually maps the demo port next
+    // to the shell's, e.g. 8788 -> 8789); this host with the demo port as published by the server
+    const host = `${location.protocol}//${location.hostname}`;
+    const cands = [...new Set([s?.demoUrl, location.port && `${host}:${+location.port + 1}`, s?.demoPort && `${host}:${s.demoPort}`].filter(Boolean))];
+    const probe = async c => { try { await fetch(c + '/__sd/ping', { mode: 'no-cors', cache: 'no-store', signal: AbortSignal.timeout(3000) }); return c; } catch { throw 0; } };
+    demoBase = await Promise.any(cands.map(probe)).catch(() => '');
+    // reached through a public name and nothing configured yet: remember it, so share links made from anywhere
+    // (even from the LAN) use the public demo address
+    if (demoBase && !s?.demoUrl && !/^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[)/.test(location.hostname)) {
+      try { await fetch('/api/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ demoUrl: demoBase }) }); s.demoUrl = demoBase; } catch {}
+    }
     return demoBase;
   }
   const isolated = () => !!demoBase;

@@ -15,6 +15,7 @@ import { getTour, tourScript } from './tour.js';
 
 const PATH_RE = /^\/p\/([a-z0-9-]+)(\/.*)?$/;
 const SHARE_RE = /^\/s\/([A-Za-z0-9_-]+)(\/.*)?$/;
+const HOP = new Set(['content-length', 'transfer-encoding', 'connection', 'keep-alive']);
 
 /**
  * Reverse proxy: /p/:id/<path> -> http://127.0.0.1:<project.port>/<path>
@@ -251,7 +252,9 @@ function forward(req, res, project, rest, { prefix, inject, onPage, body }) {
       const raw = Buffer.concat(chunks).toString('utf8');
       const html = typeof inject === 'function' ? inject(raw) : injectReporter(raw, project.id);
       res.status(up.statusCode);
-      for (const [k, v] of Object.entries(up.headers)) if (v !== undefined && k !== 'content-length') res.setHeader(k, v);
+      // the body was rewritten (scripts injected): its length is new, so drop the upstream framing headers -- sending
+      // both content-length and transfer-encoding is invalid HTTP, and reverse proxies (nginx) answer 502 to it
+      for (const [k, v] of Object.entries(up.headers)) if (v !== undefined && !HOP.has(k)) res.setHeader(k, v);
       res.setHeader('content-length', Buffer.byteLength(html));
       if (page) onPage?.();
       res.end(html);
