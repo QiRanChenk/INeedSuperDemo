@@ -71,6 +71,12 @@ export function recordView(token, visitor = '', page = '/') {
   } catch {}
 }
 
+/** Behaviour of share-link visitors, same log as views: e='a' = a write request (they actually did something:
+ *  submit / save / book …), e='d' = visible time on a page (ms), sent by the injected script when the page is hidden. */
+export function recordEvent(token, visitor, e, data) {
+  try { fs.appendFileSync(VIEWS, JSON.stringify({ t: Date.now(), k: token, v: String(visitor).slice(0, 32), e, ...data }) + '\n'); } catch {}
+}
+
 export function setShareOptions(projectId, token, { feedback }) {
   const list = readAll();
   const s = list.find(x => x.token === token && x.projectId === projectId);
@@ -86,7 +92,10 @@ export function shareStats(token, days = 14) {
   let rows = [];
   try { rows = fs.readFileSync(VIEWS, 'utf8').split('\n').filter(l => l.includes(token)).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(r => r && r.k === token); } catch {}
   const byDay = new Map(), pages = new Map(), visitors = new Set();
+  const actors = new Set(), actions = new Map(), dwell = new Map();
   for (const r of rows) {
+    if (r.e === 'a') { actors.add(r.v); const k = String(r.a || '').replace(/\/\d+(?=\/|$)/g, '/:id'); actions.set(k, (actions.get(k) || 0) + 1); continue; }
+    if (r.e === 'd') { dwell.set(r.v, (dwell.get(r.v) || 0) + Math.min(Number(r.ms) || 0, 1_800_000)); continue; }
     visitors.add(r.v);
     const k = dayKey(r.t), d = byDay.get(k) || { views: 0, visitors: new Set() };
     d.views++; d.visitors.add(r.v); byDay.set(k, d);
@@ -94,8 +103,12 @@ export function shareStats(token, days = 14) {
   }
   const series = [];
   for (let i = days - 1; i >= 0; i--) { const k = dayKey(Date.now() - i * 86_400_000), d = byDay.get(k); series.push({ date: k, views: d?.views || 0, visitors: d?.visitors.size || 0 }); }
+  const times = [...dwell.values()].sort((a, b) => a - b);
+  const views = rows.filter(r => !r.e);
   return {
-    views: rows.length, visitors: visitors.size, last: rows.at(-1)?.t || null, days: series,
+    actors: actors.size, actions: [...actions].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([action, count]) => ({ action, count })),
+    medianMs: times.length ? times[Math.floor(times.length / 2)] : null, timed: times.length,
+    views: views.length, visitors: visitors.size, last: views.at(-1)?.t || null, days: series,
     pages: [...pages].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([page, views]) => ({ page, views })),
   };
 }

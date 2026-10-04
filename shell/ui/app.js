@@ -772,7 +772,7 @@ async function openShare() {
       if (!box.hidden) { box.hidden = true; return; }
       const st = await api(`/api/projects/${id}/shares/${s.token}/stats`);
       const max = Math.max(1, ...st.days.map(d => d.views));
-      box.innerHTML = `<span><b>${st.visitors}</b> 位访客 · <b>${st.views}</b> 次打开</span><span class="sbars" title="近 14 天每日打开次数">${st.days.map(d => `<i style="height:${Math.round(d.views / max * 100)}%" title="${d.date}：${d.views} 次 / ${d.visitors} 人"></i>`).join('')}</span>${st.pages.length ? `<span>常看页面：${st.pages.slice(0, 3).map(p => `${esc(p.page)} ×${p.views}`).join('，')}</span>` : ''}`;
+      box.innerHTML = `<span><b>${st.visitors}</b> 位访客 · <b>${st.views}</b> 次打开${st.actors ? ` · <b>${st.actors}</b> 人动手操作过` : ''}</span><span class="sbars" title="近 14 天每日打开次数">${st.days.map(d => `<i style="height:${Math.round(d.views / max * 100)}%" title="${d.date}：${d.views} 次 / ${d.visitors} 人"></i>`).join('')}</span>${st.pages.length ? `<span>常看页面：${st.pages.slice(0, 3).map(p => `${esc(p.page)} ×${p.views}`).join('，')}</span>` : ''}`;
       box.hidden = false;
     };
     if (s.active) li.querySelector('.fb').onchange = e => api(`/api/projects/${id}/shares/${s.token}`, { method: 'PATCH', body: { feedback: e.target.checked } });
@@ -1029,7 +1029,9 @@ async function openReport() {
 let lastReport = null;
 function renderReport(report, ev) {
   const r = ev.reactions;
-  $('#rpStats').innerHTML = [['访客', ev.visitors], ['👍 有用', r.up], ['🤔 一般', r.meh], ['👎 用不上', r.down]].map(([k, v]) => `<div><span class="muted small">${k}</span><b>${v}</b></div>`).join('');
+  const secs = ev.medianMs != null ? Math.round(ev.medianMs / 1000) : null;
+  $('#rpStats').innerHTML = [['访客', ev.visitors], ['动手操作', ev.actors ?? 0, '提交、保存这类真实操作过的访客'], ['停留中位数', secs == null ? '–' : secs >= 60 ? `${Math.floor(secs / 60)}分${secs % 60}秒` : `${secs}秒`], ['👍 有用', r.up], ['🤔 一般', r.meh], ['👎 用不上', r.down]]
+    .map(([k, v, t]) => `<div${t ? ` title="${t}"` : ''}><span class="muted small">${k}</span><b>${v}</b></div>`).join('');
   const qa = Object.entries(ev.answers || {});
   let html = '';
   if (report) {
@@ -1038,10 +1040,14 @@ function renderReport(report, ev) {
       <div class="muted small">可信度 ${esc(report.confidence)} · 基于 ${report.stats.feedback} 条反馈 · ${new Date(report.ts).toLocaleString()}</div>
       ${report.evidence.length ? `<div class="lbl">证据</div><ul>${li(report.evidence)}</ul>` : ''}${report.concerns.length ? `<div class="lbl">顾虑</div><ul>${li(report.concerns)}</ul>` : ''}${report.next.length ? `<div class="lbl">下一步</div><ul>${li(report.next)}</ul>` : ''}</div>`;
   }
+  if (ev.groups?.length > 1) html += `<div class="rp-groups"><div class="lbl">按分享链接（不同人群）</div><table><tr><th>链接</th><th>访客</th><th>动手</th><th>👍</th><th>🤔</th><th>👎</th></tr>${ev.groups.map(g => `<tr><td>${esc(g.label)}</td><td>${g.visitors}</td><td>${g.actors}</td><td>${g.reactions.up}</td><td>${g.reactions.meh}</td><td>${g.reactions.down}</td></tr>`).join('')}</table></div>`;
   if (qa.length) html += `<div class="rp-qa">${qa.map(([q, as]) => `<p><b>${esc(q)}</b></p><ul>${as.slice(0, 8).map(a => `<li>${esc(a)}</li>`).join('')}</ul>`).join('')}</div>`;
   if (!report && !ev.feedback) html += `<div class="muted small">还没有反馈。点「分享给目标用户」生成链接发出去，试用者在页面右下角就能表态、回答验证问题。发出去之前，可以先点「AI 模拟试用」让模拟用户挑一遍毛病。</div>`;
   $('#rpBody').innerHTML = html;
   $('#rpGen').disabled = !ev.feedback; $('#rpInfo').textContent = '';
+  // how far the evidence is from a stable conclusion (≥ 5 people who reacted)
+  const reacted = r.up + r.meh + r.down;
+  if (ev.feedback && reacted < 5) $('#rpInfo').textContent = `已有 ${reacted} 人表态，再收集 ${5 - reacted} 人，结论会更可信`;
   lastReport = report; $('#rpIterate').hidden = !report || !(report.next.length || report.concerns.length);
 }
 $('#btnReport').onclick = openReport;

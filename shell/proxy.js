@@ -3,7 +3,7 @@ import net from 'node:net';
 import { readProject } from './registry.js';
 import { status, start } from './runner.js';
 import crypto from 'node:crypto';
-import { resolveShare, recordView } from './shares.js';
+import { resolveShare, recordView, recordEvent } from './shares.js';
 import { addFeedback } from './feedback.js';
 import { getTour, tourScript } from './tour.js';
 
@@ -37,6 +37,11 @@ export function shareMiddleware(req, res) {
   if (!project) return res.status(404).send(messagePage('链接已失效', '这个分享链接不存在、已过期或已被关闭，请向分享者索取新链接。'));
   if (m[2] === undefined) return res.redirect(302, `/s/${m[1]}/`);
   if (m[2].startsWith('/__sd/feedback')) return handleFeedback(req, res, share);
+  const visitorId = /(?:^|;\s*)sdv=([A-Za-z0-9_-]{8,32})/.exec(req.headers.cookie || '')?.[1];
+  if (m[2].startsWith('/__sd/ping')) return handlePing(req, res, share, visitorId);
+  // a visitor who sends a write request has actually used the demo (submitted, saved, booked …)
+  // (only successful ones: a rejected form is not a completed action)
+  if (visitorId && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) res.on('finish', () => { if (res.statusCode < 400) recordEvent(share.token, visitorId, 'a', { a: `${req.method} ${m[2].split('?')[0].slice(0, 100)}` }); });
   const st = status(project.id).status;
   if (st !== 'running') {
     if (st !== 'starting') start(project.id).catch(() => {});
@@ -56,18 +61,31 @@ export function shareMiddleware(req, res) {
   });
 }
 
-/** Scripts for share-link visitors: feedback button and (optional) demo tour card. false = page untouched. */
+/** Scripts for share-link visitors: feedback button, (optional) demo tour card, time-on-page beacon. */
 function visitorInjection(share, token) {
   const tour = getTour(share.projectId);
   const withTour = tour?.enabled && tour.steps.length;
-  if (share.feedback === false && !withTour) return false;
   return html => {
     let out = share.feedback !== false ? injectFeedback(html, token, readProject(share.projectId)?.plan?.signals || []) : html;
     if (withTour) out = appendScript(out, tourScript(tour, token));
-    return out;
+    return appendScript(out, pingScript(token));
   };
 }
 const appendScript = (html, js) => { const i = html.search(/<\/body>/i), tag = `<script>${js}</script>`; return i >= 0 ? html.slice(0, i) + tag + html.slice(i) : html + tag; };
+
+// time on page: POST /s/<token>/__sd/ping { ms, page } (sendBeacon when the page is hidden); visitors with a cookie only
+function handlePing(req, res, share, visitor) {
+  if (req.method !== 'POST' || !visitor) return res.status(204).end();
+  let body = '';
+  req.on('data', c => { body += c; if (body.length > 2000) req.destroy(); });
+  req.on('end', () => {
+    try { const j = JSON.parse(body); const ms = Math.round(Number(j.ms)); if (ms > 0) recordEvent(share.token, visitor, 'd', { ms: Math.min(ms, 1_800_000), p: String(j.page || '').slice(0, 120) }); } catch {}
+    res.status(204).end();
+  });
+}
+const pingScript = token => `(function(){var vis=0,since=document.visibilityState==='visible'?Date.now():0;
+function flush(){if(since){vis+=Date.now()-since;since=0;}if(vis<1000)return;var b=JSON.stringify({ms:vis,page:location.pathname.replace(/^\\/s\\/[^/]+/,'')});vis=0;try{navigator.sendBeacon('/s/${token}/__sd/ping',new Blob([b],{type:'application/json'}));}catch(e){}}
+document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')since=Date.now();else flush();});addEventListener('pagehide',flush);})();`;
 
 // visitor feedback: POST /s/<token>/__sd/feedback { text, name, page, viewport }; at most 30 per link per hour
 const feedbackRate = new Map();
