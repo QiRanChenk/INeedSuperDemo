@@ -145,7 +145,7 @@ function renderHeader() {
   const live = has && (current.status === 'running' || current.status === 'starting');
   for (const id of ['btnToggle', 'btnLogs', 'btnFiles', 'btnVersions', 'btnReport', 'btnShare', 'btnFeedback', 'btnMore', 'btnDuplicate', 'btnExport', 'btnDelete']) $('#' + id).disabled = !has;
   const fbn = has ? current.feedbackNew || 0 : 0;
-  $('#fbBadge').hidden = !fbn; $('#fbBadge').textContent = fbn;
+  $('#fbBadge').hidden = !fbn; $('#fbBadge').textContent = fbn; $('#btnFeedback').title = fbn ? `${fbn} 条反馈还没处理` : '别人通过分享链接留下的意见';
   $('#btnRestart').disabled = !live;
   $('#btnToggle').textContent = live ? '■ 停止' : '▶ 启动';
   $('#btnToggle').classList.toggle('start', has && !live);
@@ -912,14 +912,28 @@ $('#fbSend').onclick = async () => {
 };
 
 // ---------- visitor tour (in the share dialog) ----------
+// steps: one row each — what to do (text) + which page it opens (dropdown of the project's pages)
+let tourPages = [{ page: '', title: '首页' }];
+function tourRow(st = { text: '', page: '' }) {
+  const row = document.createElement('div'); row.className = 'tour-row';
+  const opts = [...tourPages, ...(st.page && !tourPages.some(p => p.page === st.page) ? [{ page: st.page, title: st.page }] : [])];
+  row.innerHTML = `<input class="tt" maxlength="120" placeholder="如：在「库存总览」看哪些商品标红"><select class="tp">${opts.map(p => `<option value="${esc(p.page)}">${esc(p.page ? `${p.title}（${p.page}）` : `${p.title}（首页）`)}</option>`).join('')}</select><button type="button" class="ghost small" title="删掉这一步">✕</button>`;
+  row.querySelector('.tt').value = st.text; row.querySelector('.tp').value = st.page || '';
+  row.querySelector('button').onclick = () => row.remove();
+  $('#tourSteps').appendChild(row);
+}
 function renderTour(t) {
   $('#tourTitle').value = t.title || ''; $('#tourIntro').value = t.intro || '';
-  $('#tourSteps').value = (t.steps || []).map(s => s.page ? `${s.text} | ${s.page}` : s.text).join('\n');
+  $('#tourSteps').innerHTML = ''; (t.steps?.length ? t.steps : [{ text: '', page: '' }]).forEach(tourRow);
   $('#tourOn').checked = !!t.enabled && !!t.steps?.length;
 }
 const readTour = () => ({ enabled: $('#tourOn').checked, title: $('#tourTitle').value, intro: $('#tourIntro').value,
-  steps: $('#tourSteps').value.split('\n').map(l => l.trim()).filter(Boolean).map(l => { const [text, page = ''] = l.split('|').map(x => x.trim()); return { text, page }; }) });
-async function loadTour() { try { renderTour(await api(`/api/projects/${current.id}/tour`)); $('#tourInfo').textContent = ''; } catch {} }
+  steps: [...$('#tourSteps').querySelectorAll('.tour-row')].map(r => ({ text: r.querySelector('.tt').value.trim(), page: r.querySelector('.tp').value })).filter(x => x.text) });
+async function loadTour() {
+  try { tourPages = await api(`/api/projects/${current.id}/pages`); } catch {}
+  try { renderTour(await api(`/api/projects/${current.id}/tour`)); $('#tourInfo').textContent = ''; } catch {}
+}
+$('#tourAdd').onclick = () => tourRow();
 $('#tourGen').onclick = async () => {
   const b = $('#tourGen'); b.disabled = true; $('#tourInfo').textContent = 'AI 正在根据方案和页面写导览…';
   try { renderTour(await api(`/api/projects/${current.id}/tour/generate`, { method: 'POST' })); $('#tourInfo').textContent = '✓ 已生成并启用，访客下次打开链接就能看到'; }
@@ -1074,17 +1088,21 @@ function renderExampleChips() {
 }
 
 function showBoard() { if (location.hash.startsWith('#/p/')) history.pushState(null, '', location.pathname); document.body.classList.add('view-board'); if (isPhone()) setTab('projects'); renderBoard(); }
+const boardOpen = new Set();
 function renderBoard() {
   if (!document.body.classList.contains('view-board')) return;
   if (comparing) return;
   renderIntro();
   const cols = $('#boardCols'); cols.innerHTML = '';
-  for (const [stage, icon, title, hint] of STAGES) {
+  // phones stack the columns: most valuable (conclusions) first, long columns folded to 4 cards
+  const phone = isPhone();
+  for (const [stage, icon, title, hint] of phone ? [...STAGES].reverse() : STAGES) {
     const list = projects.filter(p => (p.validation?.stage || 'building') === stage);
     const col = document.createElement('div'); col.className = 'bcol';
+    const open = !phone || boardOpen.has(stage);
     col.innerHTML = `<div class="bcol-head">${icon} <b>${title}</b><span class="n">${list.length}</span></div>`;
     if (!list.length) col.insertAdjacentHTML('beforeend', `<div class="bcol-empty">${hint}</div>`);
-    for (const p of list) {
+    list.forEach((p, k) => { if (k >= 4 && !open) return;
       const v = p.validation || {}, r = v.reactions || { up: 0, meh: 0, down: 0 }, total = r.up + r.meh + r.down;
       const card = document.createElement('div'); card.className = 'icard';
       card.innerHTML = `<div class="shot${v.thumb ? '' : ' none'}">${v.thumb ? '' : (p.validation?.stage === 'building' ? '制作中…' : '还没有截图')}</div><div class="body"><div class="name"><span class="dot ${p.status}"></span><span></span>${isBusy(p) ? '<span class="thinking small">⋯</span>' : ''}</div>
@@ -1095,6 +1113,12 @@ function renderBoard() {
       card.querySelector('.hyp').textContent = v.hypothesis || p.description || '';
       card.onclick = () => select(p.id, true);
       col.appendChild(card);
+    });
+    if (phone && list.length > 4) {
+      const more = document.createElement('button'); more.className = 'ghost bcol-more';
+      more.textContent = open ? '收起' : `展开全部 ${list.length} 个`;
+      more.onclick = () => { open ? boardOpen.delete(stage) : boardOpen.add(stage); renderBoard(); };
+      col.appendChild(more);
     }
     cols.appendChild(col);
   }
@@ -1236,7 +1260,7 @@ function renderPretest(t) {
       ${p.answers.length ? `<ul class="small">${p.answers.map(a => `<li title="${esc(a.q)}">${esc(a.a)}</li>`).join('')}</ul>` : ''}
       ${p.quote ? `<div class="pre-q">“${esc(p.quote)}”</div>` : ''}</div>`).join('')}</div>
     ${t.confusions.length ? `<div class="lbl">容易看不懂</div><ul>${li(t.confusions)}</ul>` : ''}
-    ${t.fixes.length ? `<div class="lbl">分享前建议先改</div><ul>${li(t.fixes)}</ul><div class="row end"><button id="rpPreFix" class="ghost">让 AI 先改这些</button></div>` : ''}`;
+    ${t.fixes.length ? `<div class="lbl">分享前建议先改</div><ul>${li(t.fixes)}</ul><div class="row end"><button id="rpPreFix" class="ghost" title="分享给真人之前，先按模拟用户的意见修改（不开新一轮）">按模拟意见先改</button></div>` : ''}`;
   const fix = $('#rpPreFix');
   if (fix) fix.onclick = () => {
     const msg = pretestFixMessage(t);

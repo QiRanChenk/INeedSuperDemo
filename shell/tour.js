@@ -28,6 +28,18 @@ export function saveTour(id, t) {
   return tour;
 }
 
+/** Pages for the step editor's dropdown: { page: '' for the home page | 'x.html', title }. */
+export function pageOptions(id) {
+  const dir = path.join(projectDir(id), 'public');
+  try {
+    return fs.readdirSync(dir).filter(f => f.endsWith('.html')).slice(0, 20).map(f => {
+      const html = fs.readFileSync(path.join(dir, f), 'utf8');
+      const title = ((html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) || [])[1] || (html.match(/<title>([^<]*)<\/title>/i) || [])[1] || '').replace(/<[^>]+>/g, '').trim().slice(0, 30);
+      return { page: f === 'index.html' ? '' : f, title: title || f };
+    }).sort((a, b) => (a.page === '') ? -1 : (b.page === '') ? 1 : 0);
+  } catch { return [{ page: '', title: '首页' }]; }
+}
+
 /** HTML pages of the project with their <title> / first <h1>, for the generator. */
 function pages(id) {
   const dir = path.join(projectDir(id), 'public');

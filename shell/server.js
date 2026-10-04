@@ -5,7 +5,7 @@ import { ROOT, SDK_DIR, getSettings, saveSettings, getProjectLlm, maskKey, PRESE
 import { PROJECT_TYPES, SKELETONS, skeletonAvailable, listProjects, createProject, duplicateProject, deleteProject, readProject, writeProject, fileTree, safePath, projectDir } from './registry.js';
 import { listFeedback, countNew, updateFeedback, deleteFeedback, feedbackToMessage } from './feedback.js';
 import { demoDataInfo, saveDemoData, restoreDemoData, setDailyReset, runDailyResets } from './demodata.js';
-import { getTour, saveTour, generateTour } from './tour.js';
+import { getTour, saveTour, generateTour, pageOptions } from './tour.js';
 import { getReport, makeReport, evidence, VERDICTS, currentRound, previousRound, startRound } from './report.js';
 import { makeSketch, cleanSketch } from './sketch.js';
 import { compareIdeas, adviseIdeas, getAdvice } from './compare.js';
@@ -222,6 +222,7 @@ app.post('/api/projects/:id/pretest/walks', wrap(async (req, res) => res.json({ 
 app.post('/api/projects/:id/pretest', wrap(async (req, res) => res.json({ pretest: await runPretest(req.params.id, req.body?.pages, req.body?.walks) })));
 
 // ---- visitor tour (shown on share links) ----
+app.get('/api/projects/:id/pages', wrap((req, res) => res.json(pageOptions(req.params.id))));
 app.get('/api/projects/:id/tour', wrap((req, res) => res.json(getTour(req.params.id) || { enabled: false, title: '', intro: '', steps: [] })));
 app.put('/api/projects/:id/tour', wrap((req, res) => res.json(saveTour(req.params.id, req.body || {}))));
 app.post('/api/projects/:id/tour/generate', wrap(async (req, res) => res.json(await generateTour(req.params.id))));
