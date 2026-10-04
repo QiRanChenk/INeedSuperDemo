@@ -30,14 +30,23 @@ const hostname = h => String(h || '').toLowerCase().replace(/:\d+$/, '');
 
 /** null when the request may proceed, else { status, message }. Shared by HTTP middleware and WebSocket upgrades. */
 export function checkRequest(req) {
-  if (PASSWORD) return passwordOk(req.headers.authorization) ? null : { status: 401, message: '需要登录' };
-  const host = hostname(req.headers.host);
-  if (!isLoopbackHost(host) && !EXTRA_HOSTS.has(host)) return { status: 403, message: `Host 不被允许: ${host}（如需通过其他域名访问，请设置 SUPERDEMO_PASSWORD）` };
+  // writes from another origin are refused even with valid credentials: a demo page (another port = another origin)
+  // or any website must not be able to drive the shell with the owner's cached login
+  // Sec-Fetch-Site is set by the browser and survives reverse proxies (which may rewrite Host): only same-origin
+  // (or user-initiated, 'none') writes pass; a demo on the other port is 'same-site' and is refused
+  const write = req.method !== 'GET' && req.method !== 'HEAD';
+  const sfs = req.headers['sec-fetch-site'];
+  if (write && sfs && sfs !== 'same-origin' && sfs !== 'none') return { status: 403, message: '拒绝跨站请求' };
   const origin = req.headers.origin;
-  if (origin && origin !== 'null' && req.method !== 'GET' && req.method !== 'HEAD') {
+  if (write && origin === 'null') return { status: 403, message: '拒绝跨站请求' };
+  if (PASSWORD) return passwordOk(req.headers.authorization) ? null : { status: 401, message: '需要登录' };
+  // no password (loopback only): browsers without Sec-Fetch-* still get the Origin vs Host check
+  if (write && origin && !sfs) {
     let oh = ''; try { oh = new URL(origin).host.toLowerCase(); } catch {}
     if (oh !== String(req.headers.host).toLowerCase()) return { status: 403, message: '拒绝跨站请求' };
   }
+  const host = hostname(req.headers.host);
+  if (!isLoopbackHost(host) && !EXTRA_HOSTS.has(host)) return { status: 403, message: `Host 不被允许: ${host}（如需通过其他域名访问，请设置 SUPERDEMO_PASSWORD）` };
   return null;
 }
 

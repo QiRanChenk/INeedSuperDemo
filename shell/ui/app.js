@@ -47,11 +47,12 @@ async function select(id) {
   if (isPhone() && current) setTab('chat'); // picking a project on a phone goes straight to its conversation
   await loadProjects();
   if (!current) return;
-  const url = `/p/${current.id}/`;
+  await PageBot.init();
   const live = current.status === 'running' || current.status === 'starting';
-  $('#frame').src = current.hasUi && live ? url : 'about:blank';
-  $('#previewUrl').textContent = url;
-  $('#btnOpen').href = url;
+  current.hasUi && live ? PageBot.show($('#frame'), current.id) : PageBot.clear($('#frame'));
+  $('#previewUrl').textContent = `/p/${current.id}/${PageBot.isolated() ? '' : '（⚠ 同源预览）'}`;
+  $('#previewUrl').title = PageBot.isolated() ? 'Demo 在独立的源里运行，碰不到 SuperDemo' : 'Demo 端口从这个浏览器访问不到，预览退回到和 SuperDemo 同源：请在「模型设置」里填「Demo 地址」';
+  $('#btnOpen').href = PageBot.previewUrl(current.id);
   await loadSessions();
   await Promise.all([loadHistory(), loadUsage(), loadQueue()]);
 }
@@ -150,8 +151,8 @@ function renderHeader() {
   $('#btnToggle').textContent = live ? '■ 停止' : '▶ 启动';
   $('#btnToggle').classList.toggle('start', has && !live);
   document.body.classList.toggle('no-preview', has && !live);
-  if (has && !live && $('#frame').src !== 'about:blank') $('#frame').src = 'about:blank';
-  if (live && current.hasUi && $('#frame').src === 'about:blank') $('#frame').src = `/p/${current.id}/`;
+  if (has && !live && $('#frame').src !== 'about:blank') PageBot.clear($('#frame'));
+  if (live && current.hasUi && $('#frame').src === 'about:blank') PageBot.show($('#frame'), current.id);
   $('#btnClear').disabled = !has || busy;
   updateSketchOverlay(busy);
   // busy: empty input -> stop button; typed text -> interject (queued into the running turn)
@@ -435,7 +436,7 @@ function handleEvent(pid, ev) {
 
 // while the agent is operating the preview, an automatic reload would wipe what it is doing
 const pageBotBusy = new Set();
-function reloadFrame() { const f = $('#frame'); if (current?.hasUi && !pageBotBusy.size) f.src = `/p/${current.id}/?t=${Date.now()}`; }
+function reloadFrame() { const f = $('#frame'); if (current?.hasUi && !pageBotBusy.size) PageBot.show(f, current.id, f.dataset.project === current.id ? (f.dataset.path || '').replace(/^\//, '') : ''); }
 function addShot(pid, file, label) {
   const d = addSys(pid, '📷 ' + label.replace(/^↻\s*/, ''));
   const projectId = String(pid).split(':')[0];
@@ -462,6 +463,7 @@ async function loadSettings() {
   $('#stTemp').value = settings.temperature; $('#stIter').value = settings.maxIterations; $('#stCtx').value = settings.contextWindow; $('#stStream').checked = settings.stream !== false;
   $('#stVision').value = settings.vision || 'auto';
   $('#stPublic').value = settings.publicUrl || '';
+  $('#stDemoUrl').value = settings.demoUrl || ''; $('#stDemoPort').textContent = settings.demoPort || '';
   $('#stNotify').value = settings.notifyWebhook || '';
   $('#stVisionState').textContent = settings.vision === 'auto' ? (settings.visionOk === true ? '已检测：当前模型支持图片' : settings.visionOk === false ? `已检测：当前模型不支持图片，只发送页面结构文本${settings.visionError ? `（${settings.visionError.slice(0, 120)}）` : ''}；如判断有误，把上面切到「总是发送」或重新保存即可重新检测` : '尚未检测（AI 第一次查看页面时自动判断）') : '';
   // project-side LLM
@@ -499,7 +501,7 @@ function toggleSettings(open) {
 $('#stNotifyTest').onclick = async () => { const r = $('#stResult'); r.textContent = '发送中…'; try { await api('/api/settings/notify-test', { method: 'POST', body: { url: $('#stNotify').value } }); r.textContent = '✓ 测试消息已发出，去群里看看'; } catch (e) { r.textContent = '✗ ' + e.message; } };
 $('#stDev').onchange = e => { setDev(e.target.checked); renderHeader(); };
 async function saveSettings() {
-  const body = { baseUrl: $('#stBase').value, model: $('#stModel').value, temperature: $('#stTemp').value, maxIterations: $('#stIter').value, contextWindow: $('#stCtx').value, stream: $('#stStream').checked, vision: $('#stVision').value, publicUrl: $('#stPublic').value, notifyWebhook: $('#stNotify').value, projectLlm: collectProjectLlm() };
+  const body = { baseUrl: $('#stBase').value, model: $('#stModel').value, temperature: $('#stTemp').value, maxIterations: $('#stIter').value, contextWindow: $('#stCtx').value, stream: $('#stStream').checked, vision: $('#stVision').value, publicUrl: $('#stPublic').value, demoUrl: $('#stDemoUrl').value, notifyWebhook: $('#stNotify').value, projectLlm: collectProjectLlm() };
   if ($('#stKey').value) body.apiKey = $('#stKey').value;
   const saved = await api('/api/settings', { method: 'PUT', body });
   await loadSettings();
@@ -775,7 +777,7 @@ $('#btnClear').onclick = async () => { if (confirm('清空当前会话的对话�
 $('#btnDelete').onclick = async () => {
   if (!confirm(`删除项目「${current.name}」及其全部文件？不可恢复。`)) return;
   await api(`/api/projects/${current.id}`, { method: 'DELETE' });
-  current = null; currentSession = null; $('#frame').src = 'about:blank'; $('#messages').innerHTML = ''; $('#usage').hidden = true; $('#sessionBar').hidden = true; $('#queueBar').hidden = true;
+  current = null; currentSession = null; PageBot.clear($('#frame')); $('#messages').innerHTML = ''; $('#usage').hidden = true; $('#sessionBar').hidden = true; $('#queueBar').hidden = true;
   await loadProjects();
 };
 $('#btnLogs').onclick = async () => {
@@ -797,7 +799,9 @@ $('#btnFiles').onclick = async () => {
 $('#panelClose').onclick = () => $('#dlgPanel').close();
 
 // ---------- share links ----------
-const shareUrl = token => `${settings?.publicUrl || location.origin}/s/${token}/`;
+// share links: the demo origin's public address; else the shell's public address (reachable from outside, but same
+// origin as the shell); else the demo origin as seen from here; else this origin
+const shareUrl = token => `${settings?.demoUrl || settings?.publicUrl || PageBot.origin() || location.origin}/s/${token}/`;
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); return true; }
   catch { // http:// on a LAN address is not a secure context: no Clipboard API
@@ -846,7 +850,7 @@ async function openShare() {
     li.querySelector('.surl').textContent = shareUrl(s.token);
     li.querySelector('.small').textContent = [s.label, state, `打开 ${s.views || 0} 次`, s.lastViewAt ? `最近 ${new Date(s.lastViewAt).toLocaleString()}` : ''].filter(Boolean).join(' · ');
     if (s.active) {
-      if (li.querySelector('.open')) li.querySelector('.open').href = `/s/${s.token}/?_sdself=1`; // the owner's own look is not a visit
+      if (li.querySelector('.open')) li.querySelector('.open').href = `${settings?.demoUrl || PageBot.origin() || ''}/s/${s.token}/?_sdself=${current.previewKey}`; // the owner's own look is not a visit
       li.querySelector('.copy').onclick = async e => { e.target.textContent = await copyText(shareUrl(s.token)) ? '已复制' : '复制失败'; };
       li.querySelector('.off').onclick = async () => { if (!confirm('停用后这个链接立即失效，拿到链接的人将打不开，确定？')) return; await api(`/api/projects/${id}/shares/${s.token}`, { method: 'DELETE' }); openShare(); };
     }

@@ -59,6 +59,14 @@ if [ ! -f .env ]; then
 else
   say "沿用已有 .env（端口 ${PORT}，访问口令不变）"
 fi
+# demo port (previews + share links on their own origin): next to the shell's port unless taken
+if ! grep -q '^DEMO_HOST_PORT=' .env; then
+  DPORT=$((PORT+1))
+  while port_busy "$DPORT" && ! $DOCKER ps --format '{{.Ports}}' | grep -q ":$DPORT->"; do DPORT=$((DPORT+1)); done
+  printf 'DEMO_HOST_PORT=%s\n' "$DPORT" >> .env
+  say "Demo 端口：${DPORT}（预览和分享链接，和 SuperDemo 隔离）"
+fi
+DEMO_PORT_OUT="$(sed -n 's/^DEMO_HOST_PORT=//p' .env)"
 
 if [ -f /tmp/sd-image.tgz ]; then
   say "载入本机构建的镜像"
@@ -93,6 +101,7 @@ echo
 echo "=================================================="
 echo "  部署完成  $(date '+%m-%d %H:%M')"
 echo "  地址：     http://$IP:$PORT"
+echo "  Demo 端口：$DEMO_PORT_OUT（预览/分享链接；用域名访问时在设置里填「Demo 地址」）"
 echo "  访问口令： $AP   （浏览器弹出登录框，用户名随意）"
 echo "  目录：     $DIR   （data/ 设置与 Key，projects/ 项目与数据，.env 含口令，勿删）"
 echo "=================================================="

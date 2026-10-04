@@ -10,10 +10,11 @@ import { getReport, makeReport, evidence, VERDICTS, currentRound, previousRound,
 import { makeSketch, cleanSketch } from './sketch.js';
 import { compareIdeas, adviseIdeas, getAdvice } from './compare.js';
 import { sendBot, runDigest } from './notify.js';
+import { recordClientError } from './weberrors.js';
 import { getPretest, runPretest, planWalks, continueWalk, pageList } from './personas.js';
 import { makePlan, normalizePlan, planToMessage } from './planner.js';
 import * as runner from './runner.js';
-import { proxyMiddleware, proxyUpgrade, shareMiddleware, upgradeTarget } from './proxy.js';
+import { proxyMiddleware, proxyUpgrade, shareMiddleware, upgradeTarget, demoPreview, demoUpgradeAllowed, previewKey } from './proxy.js';
 import { listShares, createShare, revokeShare, deleteSharesOf, setShareOptions, shareStats } from './shares.js';
 import { testConnection } from './llm.js';
 import { runAgent, attachRun, stopRun, interject, listQueue, enqueue, dequeue, clearQueue, isBusy, usageSummary, generateProjectName, getContextInfo, claimBrowser, resolveBrowser, shotPath } from './agent.js';
@@ -26,7 +27,12 @@ import { listSnapshots, restoreSnapshot } from './snapshots.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
+// demo origin: previews and share links on their own port, so demo pages can't touch the shell (see proxy.js)
+const DEMO_PORT = Number(process.env.SUPERDEMO_DEMO_PORT || PORT + 1);
+const DEMO_PUBLIC_PORT = Number(process.env.SUPERDEMO_DEMO_PUBLIC_PORT || DEMO_PORT); // as seen from browsers (Docker port mapping)
 
+// share links on the shell's own origin: forwarded to the demo origin once its public address is known
+app.use('/s', (req, res, next) => { const d = getSettings().demoUrl; if (d) return res.redirect(302, d + req.originalUrl); next(); });
 app.use('/s', shareMiddleware); // share links: public by design, before access control
 app.use(authMiddleware);
 app.use('/p', proxyMiddleware);
@@ -39,7 +45,7 @@ app.get('/api/health', (req, res) => res.json({ ok: true }));
 
 // ---- settings ----
 const publicSettings = s => ({
-  ...s,
+  ...s, demoPort: DEMO_PUBLIC_PORT,
   apiKey: maskKey(s.apiKey), hasKey: !!s.apiKey,
   projectLlm: { ...s.projectLlm, apiKey: maskKey(s.projectLlm.apiKey), hasKey: !!s.projectLlm.apiKey },
   effectiveProjectLlm: (() => { const e = getProjectLlm(s); return { ...e, apiKey: maskKey(e.apiKey), hasKey: !!e.apiKey }; })(),
@@ -52,7 +58,7 @@ app.post('/api/settings/notify-test', wrap(async (req, res) => {
 }));
 app.get('/api/settings', (req, res) => res.json({ ...publicSettings(getSettings()), presets: PRESETS }));
 app.put('/api/settings', wrap(async (req, res) => {
-  const { baseUrl, apiKey, model, temperature, maxIterations, contextWindow, stream, projectLlm, vision, agentThinking, publicUrl, notifyWebhook } = req.body || {};
+  const { baseUrl, apiKey, model, temperature, maxIterations, contextWindow, stream, projectLlm, vision, agentThinking, publicUrl, notifyWebhook, demoUrl } = req.body || {};
   const before = JSON.stringify(getProjectLlm());
   const patch = {};
   if (projectLlm && typeof projectLlm === 'object') {
@@ -74,6 +80,7 @@ app.put('/api/settings', wrap(async (req, res) => {
   if (['auto', 'on', 'off'].includes(vision)) patch.vision = vision;
   if (['on', 'off'].includes(agentThinking)) patch.agentThinking = agentThinking;
   if (notifyWebhook !== undefined) { const u = String(notifyWebhook).trim(); if (u && !/^https:\/\/[^\s]+$/.test(u)) return res.status(400).json({ error: '机器人地址要以 https:// 开头（企业微信 / 飞书 / 钉钉群机器人的 Webhook 地址）' }); patch.notifyWebhook = u; }
+  if (demoUrl !== undefined) { const u = normPublicUrl(demoUrl); if (String(demoUrl).trim() && !u) return res.status(400).json({ error: 'Demo 地址要以 http:// 或 https:// 开头，如 https://demo.example.com:8789' }); patch.demoUrl = u; }
   if (publicUrl !== undefined) { const u = normPublicUrl(publicUrl); if (String(publicUrl).trim() && !u) return res.status(400).json({ error: '分享地址要以 http:// 或 https:// 开头，如 https://demo.example.com' }); patch.publicUrl = u; }
   // model / endpoint / vision mode changed -> image support has to be detected again
   const cur = getSettings();
@@ -94,7 +101,7 @@ app.post('/api/settings/test-project', wrap(async (req, res) => {
 }));
 
 // ---- projects ----
-const withStatus = p => ({ ...p, ...runner.status(p.id), busy: isBusy(p.id), typeLabel: PROJECT_TYPES[p.type]?.label, hasUi: !!PROJECT_TYPES[p.type]?.hasUi });
+const withStatus = p => ({ ...p, previewKey: previewKey(p.id), ...runner.status(p.id), busy: isBusy(p.id), typeLabel: PROJECT_TYPES[p.type]?.label, hasUi: !!PROJECT_TYPES[p.type]?.hasUi });
 
 app.get('/api/project-types', (req, res) => res.json(Object.entries(PROJECT_TYPES).map(([id, t]) => ({ id, label: t.label, available: !!t.template }))));
 // most recently chatted first; never-chatted projects fall back to creation time
@@ -161,19 +168,8 @@ app.get('/api/projects/:id/file', wrap((req, res) => {
   res.type('text/plain').send(fs.readFileSync(abs, 'utf8'));
 }));
 
-// ---- front-end errors reported by the preview page (script injected by the proxy) ----
-const recentWebErrors = new Map(); // `${id}\n${message}` -> ts, to drop repeats
-app.post('/api/projects/:id/client-errors', (req, res) => {
-  const id = req.params.id, b = req.body || {};
-  res.status(204).end();
-  if (!readProject(id)) return;
-  const msg = `[${String(b.kind || 'error').slice(0, 20)}] ${String(b.message || '').slice(0, 1500).replace(/\s*\n\s*/g, ' ⏎ ')}${b.page && b.page !== '/' ? ` (页面 ${String(b.page).slice(0, 200)})` : ''}`;
-  const key = id + '\n' + msg, now = Date.now();
-  if (now - (recentWebErrors.get(key) || 0) < 10_000) return;
-  recentWebErrors.set(key, now);
-  if (recentWebErrors.size > 500) for (const [k, t] of recentWebErrors) if (now - t > 60_000) recentWebErrors.delete(k);
-  runner.log(id, 'web', msg);
-});
+// ---- front-end errors reported by the preview page (legacy same-origin preview; the demo origin has its own route) ----
+app.post('/api/projects/:id/client-errors', (req, res) => { res.status(204).end(); recordClientError(req.params.id, req.body || {}); });
 
 // ---- agent page tools: an open tab claims the request, works on the preview and posts the result ----
 app.post('/api/projects/:id/browser/:reqId/claim', (req, res) => res.json({ ok: claimBrowser(req.params.id, req.params.reqId) }));
@@ -426,6 +422,20 @@ async function boot() {
     console.log(`\n  SuperDemo 壳已启动:  http://${isLoopbackHost(HOST) ? 'localhost' : HOST}:${PORT}${passwordEnabled() ? '  (已启用访问口令)' : ''}`);
     console.log(`  LLM: ${s.baseUrl || '(未配置)'}  model=${s.model || '(未配置)'}  key=${s.apiKey ? maskKey(s.apiKey) : '(未配置)'}`);
     console.log(`  项目: ${projects.length} 个\n`);
+  });
+  // the demo origin: only /p/ (owner preview, key-checked) and /s/ (share links); nothing of the shell lives here
+  const demo = express();
+  demo.disable('x-powered-by');
+  demo.get('/__sd/ping', (req, res) => res.status(204).end()); // reachability probe from the shell UI
+  demo.use('/s', shareMiddleware);
+  demo.use('/p', demoPreview);
+  demo.use((req, res) => res.status(404).send('Not Found'));
+  const demoServer = demo.listen(DEMO_PORT, HOST, () => console.log(`  Demo 预览/分享（独立源）: 端口 ${DEMO_PORT}${DEMO_PUBLIC_PORT !== DEMO_PORT ? `（对外 ${DEMO_PUBLIC_PORT}）` : ''}`));
+  demoServer.on('error', e => console.error(`  ✗ Demo 端口 ${DEMO_PORT} 无法监听：${e.message}（预览会退回同源模式）`));
+  demoServer.on('upgrade', (req, socket, head) => {
+    if (req.url.startsWith('/s/')) { const t = upgradeTarget(req.url); return t ? proxyUpgrade(req, socket, head, t) : socket.destroy(); }
+    if (req.url.startsWith('/p/') && demoUpgradeAllowed(req)) return proxyUpgrade(req, socket, head);
+    socket.destroy();
   });
   // WebSocket upgrades: /p/<id>/… behind the shell's access control, /s/<token>/… via a live share link
   server.on('upgrade', (req, socket, head) => {

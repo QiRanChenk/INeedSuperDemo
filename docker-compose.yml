@@ -8,8 +8,12 @@ services:
     init: true # reaps the project processes / shell commands the agent spawns
     ports:
       - "${HOST_PORT:-18788}:3000"
+      # demo previews and share links live on their own port (another origin), isolated from the shell
+      - "${DEMO_HOST_PORT:-18789}:3001"
     environment:
       HOST: 0.0.0.0
+      SUPERDEMO_DEMO_PORT: 3001
+      SUPERDEMO_DEMO_PUBLIC_PORT: ${DEMO_HOST_PORT:-18789}
       # Required when listening beyond loopback: the agent can run commands. Browser login, any username.
       SUPERDEMO_PASSWORD: ${SUPERDEMO_PASSWORD:?set SUPERDEMO_PASSWORD in .env}
       TZ: Asia/Shanghai

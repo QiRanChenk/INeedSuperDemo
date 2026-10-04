@@ -3,12 +3,15 @@ import net from 'node:net';
 import { readProject } from './registry.js';
 import { status, start } from './runner.js';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { DATA_DIR } from './config.js';
+import { recordClientError } from './weberrors.js';
 import { resolveShare, recordView, recordEvent } from './shares.js';
 import { feedbackScript } from './feedback-widget.js';
 import { notifyFeedback } from './notify.js';
 import { addFeedback } from './feedback.js';
 import { getTour, tourScript } from './tour.js';
-import { checkRequest } from './auth.js';
 
 const PATH_RE = /^\/p\/([a-z0-9-]+)(\/.*)?$/;
 const SHARE_RE = /^\/s\/([A-Za-z0-9_-]+)(\/.*)?$/;
@@ -26,7 +29,58 @@ export function proxyMiddleware(req, res) {
   if (rest === undefined) return res.redirect(302, `/p/${id}/`);
   const project = readProject(id);
   if (!project) return res.status(404).send('project not found');
-  forward(req, res, project, rest, { prefix: `/p/${id}`, inject: true });
+  // legacy same-origin preview (used when the demo origin isn't reachable): same in-page bot, errors to the shell API
+  forward(req, res, project, rest, { prefix: `/p/${id}`, inject: html => injectBot(injectReporter(html, id, `/api/projects/${id}/client-errors`), previewKey(id)) });
+}
+
+// ---------- demo origin ----------
+// Demos are served from a second port (another origin), so nothing a demo page runs can reach the shell's window,
+// storage or same-origin API. The owner's preview there is unlocked by a per-project key (HMAC of a server secret),
+// passed once in the URL and then kept in a cookie scoped to /p/<id>/.
+let secret = null;
+function serverSecret() {
+  if (secret) return secret;
+  const f = path.join(DATA_DIR, '.secret');
+  try { secret = fs.readFileSync(f, 'utf8').trim(); } catch {}
+  if (!secret) { secret = crypto.randomBytes(32).toString('hex'); fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(f, secret, { mode: 0o600 }); }
+  return secret;
+}
+export const previewKey = id => crypto.createHmac('sha256', serverSecret()).update('preview:' + id).digest('base64url').slice(0, 24);
+const keyOk = (id, k) => { const want = Buffer.from(previewKey(id)), got = Buffer.from(String(k || '')); return got.length === want.length && crypto.timingSafeEqual(got, want); };
+
+/** /p/<id>/… on the demo origin: key check, then the proxy with the error reporter + in-page bot injected. */
+export function demoPreview(req, res) {
+  const m = req.originalUrl.match(PATH_RE);
+  if (!m) return res.status(404).send('Not Found');
+  const [, id] = m;
+  let rest = m[2];
+  const fromUrl = /[?&]_sdk=([A-Za-z0-9_-]+)/.exec(rest || '')?.[1];
+  const fromCookie = /(?:^|;\s*)sdpk=([A-Za-z0-9_-]+)/.exec(req.headers.cookie || '')?.[1];
+  if (!keyOk(id, fromUrl) && !keyOk(id, fromCookie)) return res.status(403).send(messagePage('需要从 SuperDemo 打开', '这是项目的预览地址，请在 SuperDemo 里打开它；要给别人看，请用「分享」生成链接。'));
+  if (fromUrl) {
+    res.appendHeader('set-cookie', `sdpk=${fromUrl}; Path=/p/${id}/; HttpOnly; SameSite=Lax${req.headers['x-forwarded-proto'] === 'https' || req.secure ? '; Secure' : ''}`);
+    rest = rest.replace(/([?&])_sdk=[^&#]*&?/, '$1').replace(/[?&]$/, '');
+  }
+  if (rest === undefined) return res.redirect(302, `/p/${id}/`);
+  if (rest.startsWith('/__sd/errors')) {
+    let body = '';
+    req.on('data', c => { body += c; if (body.length > 20_000) req.destroy(); });
+    req.on('end', () => { try { recordClientError(id, JSON.parse(body || '{}')); } catch {} res.status(204).end(); });
+    return;
+  }
+  const project = readProject(id);
+  if (!project) return res.status(404).send('project not found');
+  forward(req, res, project, rest, { prefix: `/p/${id}`, inject: html => injectBot(injectReporter(html, id, `/p/${id}/__sd/errors`), previewKey(id)) });
+}
+/** WebSocket upgrades to /p/<id>/ on the demo origin need the same key cookie. */
+export const demoUpgradeAllowed = req => { const m = req.url.match(PATH_RE); return !!m && keyOk(m[1], /(?:^|;\s*)sdpk=([A-Za-z0-9_-]+)/.exec(req.headers.cookie || '')?.[1]); };
+
+let botSrc = null;
+function injectBot(html, key) {
+  botSrc ??= fs.readFileSync(new URL('./ui/pagebot-core.js', import.meta.url), 'utf8');
+  const tag = `<script>(${botSrc.trim().replace(/;?\s*$/, '')})(${JSON.stringify(key)});</script>`;
+  const i = html.search(/<\/body>/i);
+  return i >= 0 ? html.slice(0, i) + tag + html.slice(i) : html + tag;
 }
 
 /**
@@ -42,9 +96,11 @@ export function shareMiddleware(req, res) {
   if (m[2].startsWith('/__sd/feedback')) return handleFeedback(req, res, share);
   // the owner previewing via 「打开看看」 (?_sdself=1, remembered in a cookie for this link) is not counted as a visitor
   // (only honoured for the owner: a request that would pass the shell's own access check)
-  const asksSelf = /[?&]_sdself=1\b/.test(m[2] || '') && !checkRequest(req);
-  const self = asksSelf || (/(?:^|;\s*)sdself=1/.test(req.headers.cookie || '') && !checkRequest(req));
-  if (asksSelf) res.appendHeader('set-cookie', `sdself=1; Path=/s/${m[1]}/; Max-Age=31536000; SameSite=Lax; HttpOnly`);
+  // proof of being the owner: the project's preview key (the shell's own credentials don't reach the demo origin)
+  const asked = /[?&]_sdself=([A-Za-z0-9_-]+)/.exec(m[2] || '')?.[1];
+  const asksSelf = !!asked && keyOk(share.projectId, asked);
+  const self = asksSelf || keyOk(share.projectId, /(?:^|;\s*)sdself=([A-Za-z0-9_-]+)/.exec(req.headers.cookie || '')?.[1]);
+  if (asksSelf) res.appendHeader('set-cookie', `sdself=${asked}; Path=/s/${m[1]}/; Max-Age=31536000; SameSite=Lax; HttpOnly`);
   const visitorId = self ? null : /(?:^|;\s*)sdv=([A-Za-z0-9_-]{8,32})/.exec(req.headers.cookie || '')?.[1];
   if (m[2].startsWith('/__sd/ping')) return handlePing(req, res, share, visitorId);
   // a visitor who sends a write request has actually used the demo (submitted, saved, booked …)
@@ -239,8 +295,8 @@ export function proxyUpgrade(req, socket, head, target = upgradeTarget(req.url))
 }
 
 /** Insert the reporter as the first script of the page (before the project's own scripts run). */
-export function injectReporter(html, id) {
-  const tag = `<script>${errorReporter(id)}</script>`;
+export function injectReporter(html, id, url = `/api/projects/${id}/client-errors`) {
+  const tag = `<script>${errorReporter(url)}</script>`;
   const m = html.match(/<head[^>]*>/i);
   if (m) return html.slice(0, m.index + m[0].length) + tag + html.slice(m.index + m[0].length);
   const d = html.match(/<!doctype[^>]*>/i);
@@ -249,8 +305,8 @@ export function injectReporter(html, id) {
 
 // Reports uncaught errors, unhandled rejections, console.error, failed resources and 5xx fetches to the shell.
 // Also counts in-flight fetch / XHR (window.__sdInflight) so the agent's page tools can wait for the page to settle.
-function errorReporter(id) {
-  return `(function(){var u='/api/projects/${id}/client-errors',n=0;
+function errorReporter(url) {
+  return `(function(){var u=${JSON.stringify(url)},n=0;
 function s(k,m){if(n++>30)return;try{var b=JSON.stringify({kind:k,message:String(m).slice(0,1500),page:location.pathname.replace(/^\\/p\\/[^/]+/,'')});
 if(navigator.sendBeacon)navigator.sendBeacon(u,new Blob([b],{type:'application/json'}));else fetch(u,{method:'POST',body:b,headers:{'content-type':'application/json'},keepalive:true});}catch(_){}}
 addEventListener('error',function(e){var t=e.target;if(t&&t!==window&&(t.src||t.href)){s('resource','资源加载失败: '+(t.src||t.href).replace(location.origin,''));return;}
