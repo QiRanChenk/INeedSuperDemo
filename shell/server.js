@@ -8,6 +8,7 @@ import { demoDataInfo, saveDemoData, restoreDemoData, setDailyReset, runDailyRes
 import { getTour, saveTour, generateTour } from './tour.js';
 import { getReport, makeReport, evidence, VERDICTS, currentRound, previousRound, startRound } from './report.js';
 import { makeSketch, cleanSketch } from './sketch.js';
+import { compareIdeas, adviseIdeas, getAdvice } from './compare.js';
 import { getPretest, runPretest, planWalks, continueWalk, pageList } from './personas.js';
 import { makePlan, normalizePlan, planToMessage } from './planner.js';
 import * as runner from './runner.js';
@@ -207,6 +208,9 @@ function validationOf(p) {
   for (const x of pt?.personas || []) pretest[x.reaction]++;
   return { stage, hypothesis: p.plan?.hypothesis || '', reactions, actors, pretest, sketchPending, feedback: fb.length, shares, verdict: report?.verdict || null, verdictLabel: report ? VERDICTS[report.verdict] : null, thumb };
 }
+// idea portfolio: every idea's evidence side by side + (optional) AI advice on which to pursue
+app.get('/api/ideas/compare', wrap((req, res) => res.json({ ideas: compareIdeas(), advice: getAdvice() })));
+app.post('/api/ideas/advice', wrap(async (req, res) => res.json({ advice: await adviseIdeas(), ideas: compareIdeas() })));
 const roundInfo = id => { const c = currentRound(id), p = previousRound(id); return { round: c.n, since: c.start, previous: p ? { n: p.n, stats: p.stats, verdict: p.report?.verdict || null, summary: p.report?.summary || '' } : null }; };
 app.get('/api/projects/:id/report', wrap((req, res) => res.json({ report: getReport(req.params.id), evidence: evidence(req.params.id), ...roundInfo(req.params.id) })));
 app.post('/api/projects/:id/report', wrap(async (req, res) => res.json({ report: await makeReport(req.params.id), evidence: evidence(req.params.id), ...roundInfo(req.params.id) })));

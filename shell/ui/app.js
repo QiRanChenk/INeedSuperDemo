@@ -1076,6 +1076,7 @@ function renderExampleChips() {
 function showBoard() { if (location.hash.startsWith('#/p/')) history.pushState(null, '', location.pathname); document.body.classList.add('view-board'); if (isPhone()) setTab('projects'); renderBoard(); }
 function renderBoard() {
   if (!document.body.classList.contains('view-board')) return;
+  if (comparing) return;
   renderIntro();
   const cols = $('#boardCols'); cols.innerHTML = '';
   for (const [stage, icon, title, hint] of STAGES) {
@@ -1099,6 +1100,40 @@ function renderBoard() {
   }
 }
 $('#bdNew').onclick = () => $('#newProject').click();
+
+// ---------- idea comparison: all ideas' evidence side by side ----------
+let comparing = false;
+const SIGNAL_CLS = { strong: 'support', mixed: 'partial', thin: 'unclear', weak: 'reject', none: 'unclear' };
+const pct = v => `${Math.round(v * 100)}%`;
+async function renderCompare(data) {
+  const box = $('#boardCompare');
+  const { ideas, advice } = data || await api('/api/ideas/compare');
+  const byId = Object.fromEntries(ideas.map(m => [m.id, m]));
+  const tried = ideas.filter(m => m.visitors || m.reacted || m.pretest).length;
+  box.innerHTML = `<div class="cmp-advice">${advice ? `<div class="row between"><b>🤖 AI 建议</b><span class="muted small">${new Date(advice.ts).toLocaleString()}</span></div>
+      <div>${esc(advice.summary)}</div>
+      ${advice.focus && byId[advice.focus] ? `<div>最值得继续：<a href="#/p/${advice.focus}">${esc(byId[advice.focus].name)}</a></div>` : ''}
+      ${advice.park.length ? `<div class="muted small">建议先放下：${advice.park.filter(id => byId[id]).map(id => esc(byId[id].name)).join('、')}</div>` : ''}
+      ${advice.todo.length ? `<ul>${advice.todo.map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}` : `<div class="muted small">下表按证据强弱排好了：行为（真动手、留联系方式）比点赞更可信，不到 5 人的结论不稳。也可以让 AI 综合看看。</div>`}
+      <div class="row end"><span id="cmpInfo" class="muted small" style="flex:1"></span><button id="cmpAdvise" class="${advice ? 'ghost' : 'primary'}"${tried < 2 ? ' disabled title="至少 2 个想法有试用数据才好比较"' : ''}>🤖 AI 帮我比一比</button></div></div>
+    <table class="cmp"><thead><tr><th>想法</th><th>信号</th><th title="打开过分享链接的人">访客</th><th title="在 Demo 里真的提交、保存过东西的人">真动手</th><th title="点了「有用」并留下联系方式的人">留联系方式</th><th>👍 占比</th><th>结论</th><th>下一步</th></tr></thead><tbody>
+    ${ideas.map(m => `<tr data-id="${m.id}"><td><b>${esc(m.name)}</b>${m.round > 1 ? ` <span class="muted small">第 ${m.round} 轮</span>` : ''}<div class="muted small hyp">${esc(m.hypothesis)}</div></td>
+      <td><span class="verdict ${SIGNAL_CLS[m.signal]}">${m.label}</span>${m.signal !== 'none' && m.signal !== 'thin' ? `<div class="scorebar"><i style="width:${Math.round(m.score * 100)}%"></i></div>` : ''}</td>
+      <td>${m.visitors || (m.reacted ? `≥${m.reacted}` : '–')}</td><td>${m.actors ? `${m.actors} <span class="muted small">${pct(m.actRate)}</span>` : '–'}</td><td>${m.contacts || '–'}</td>
+      <td>${m.reacted ? `${pct(m.upRate)} <span class="muted small">${m.up}/${m.reacted}</span>` : (m.pretest ? `<span class="sim" title="AI 模拟用户，非真人">模拟 👍${m.pretest.up}/${m.pretest.up + m.pretest.meh + m.pretest.down}</span>` : '–')}</td>
+      <td>${m.verdict ? `<span class="verdict ${m.verdict}">${esc(m.verdictLabel)}</span>` : '–'}</td><td class="small">${esc(m.next)}</td></tr>`).join('')}</tbody></table>`;
+  box.querySelectorAll('tr[data-id]').forEach(tr => { tr.onclick = () => select(tr.dataset.id); });
+  $('#cmpAdvise').onclick = async () => {
+    const b = $('#cmpAdvise'); b.disabled = true; $('#cmpInfo').textContent = 'AI 正在比较各个想法的证据…';
+    try { renderCompare(await api('/api/ideas/advice', { method: 'POST' })); } catch (e) { $('#cmpInfo').textContent = '✗ ' + e.message; b.disabled = false; }
+  };
+}
+function setComparing(on) {
+  comparing = on;
+  $('#boardCompare').hidden = !on; $('#boardCols').hidden = on; $('#bdCompare').textContent = on ? '▦ 看板视图' : '⚖ 对比想法';
+  if (on) { $('#boardIntro').hidden = true; renderCompare().catch(e => { $('#boardCompare').textContent = '✗ ' + e.message; }); } else renderBoard();
+}
+$('#bdCompare').onclick = () => setComparing(!comparing);
 $('#btnBoard').onclick = showBoard;
 addEventListener('hashchange', () => { const m = location.hash.match(/^#\/p\/(\w+)/); if (m) { if (current?.id !== m[1] || document.body.classList.contains('view-board')) select(m[1]); } else showBoard(); });
 addEventListener('popstate', () => { if (!location.hash) showBoard(); });

@@ -294,3 +294,22 @@ dialog, .dlg, #messages { scrollbar-color: #3a4152 transparent; }
 .warn-box { display: block; background: rgba(210,153,34,.15); color: #e3b341; border: 1px solid rgba(210,153,34,.4); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
 .pp-adv { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; } .pp-adv summary { cursor: pointer; color: var(--muted); font-size: 13px; } .pp-adv[open] { display: flex; flex-direction: column; gap: 10px; }
 @media (max-width: 760px) { #chat > header .actions { flex-wrap: wrap; row-gap: 6px; } }
+.board-compare { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; overflow: auto; padding: 0 22px 22px; }
+.board-compare[hidden] { display: none; }
+@media (max-width: 760px) { .board-compare { padding: 0 12px 16px; } }
+.cmp-advice { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; background: var(--panel); }
+.cmp-advice ul { margin: 0; padding-left: 18px; } .cmp-advice a { color: var(--brand); }
+table.cmp { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.cmp th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+table.cmp td { padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.cmp tbody tr { cursor: pointer; } table.cmp tbody tr:hover { background: rgba(127,127,127,.08); }
+table.cmp .hyp { max-width: 340px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.scorebar { margin-top: 6px; height: 4px; width: 70px; background: rgba(127,127,127,.25); border-radius: 2px; overflow: hidden; } .scorebar i { display: block; height: 100%; background: #3fb950; }
+table.cmp .sim { color: #a78bfa; }
+@media (max-width: 760px) {
+  table.cmp thead { display: none; } table.cmp, table.cmp tbody, table.cmp tr, table.cmp td { display: block; width: 100%; }
+  table.cmp tr { border: 1px solid var(--line); border-radius: 12px; margin-bottom: 10px; padding: 6px 4px; } table.cmp td { border: 0; padding: 4px 10px; }
+  table.cmp td:nth-child(3)::before { content: '访客 '; color: var(--muted); } table.cmp td:nth-child(4)::before { content: '真动手 '; color: var(--muted); }
+  table.cmp td:nth-child(5)::before { content: '留联系方式 '; color: var(--muted); } table.cmp td:nth-child(6)::before { content: '👍 占比 '; color: var(--muted); }
+  table.cmp td:nth-child(7)::before { content: '结论 '; color: var(--muted); }
+}
