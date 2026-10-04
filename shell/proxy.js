@@ -5,6 +5,7 @@ import { status, start } from './runner.js';
 import crypto from 'node:crypto';
 import { resolveShare, recordView, recordEvent } from './shares.js';
 import { feedbackScript } from './feedback-widget.js';
+import { notifyFeedback } from './notify.js';
 import { addFeedback } from './feedback.js';
 import { getTour, tourScript } from './tour.js';
 
@@ -38,7 +39,10 @@ export function shareMiddleware(req, res) {
   if (!project) return res.status(404).send(messagePage('链接已失效', '这个分享链接不存在、已过期或已被关闭，请向分享者索取新链接。'));
   if (m[2] === undefined) return res.redirect(302, `/s/${m[1]}/`);
   if (m[2].startsWith('/__sd/feedback')) return handleFeedback(req, res, share);
-  const visitorId = /(?:^|;\s*)sdv=([A-Za-z0-9_-]{8,32})/.exec(req.headers.cookie || '')?.[1];
+  // the owner previewing via 「打开看看」 (?_sdself=1, remembered in a cookie for this link) is not counted as a visitor
+  const self = /(?:^|;\s*)sdself=1/.test(req.headers.cookie || '') || /[?&]_sdself=1\b/.test(m[2] || '');
+  if (/[?&]_sdself=1\b/.test(m[2] || '')) res.appendHeader('set-cookie', `sdself=1; Path=/s/${m[1]}/; Max-Age=31536000; SameSite=Lax; HttpOnly`);
+  const visitorId = self ? null : /(?:^|;\s*)sdv=([A-Za-z0-9_-]{8,32})/.exec(req.headers.cookie || '')?.[1];
   if (m[2].startsWith('/__sd/ping')) return handlePing(req, res, share, visitorId);
   // a visitor who sends a write request has actually used the demo (submitted, saved, booked …)
   // (only successful ones: a rejected form is not a completed action)
@@ -61,6 +65,7 @@ export function shareMiddleware(req, res) {
     prefix: `/s/${m[1]}`,
     inject: visitorInjection(share, m[1]),
     onPage: () => {
+      if (self) return;
       recordView(share.token, visitor, m[2].split('?')[0]);
       if (!existing) res.appendHeader('set-cookie', `${cookieName}=${visitor}; Path=/s/${m[1]}/; Max-Age=31536000; SameSite=Lax; HttpOnly`);
     },
@@ -118,7 +123,8 @@ function handleFeedback(req, res, share) {
   req.on('end', () => {
     try {
       const b = JSON.parse(body || '{}');
-      addFeedback(share.projectId, { ...b, share });
+      const f = addFeedback(share.projectId, { ...b, share });
+      try { notifyFeedback(readProject(share.projectId), f); } catch {}
       feedbackRate.set(key, (feedbackRate.get(key) || 0) + 1);
       if (feedbackRate.size > 1000) feedbackRate.clear();
       res.json({ ok: true });

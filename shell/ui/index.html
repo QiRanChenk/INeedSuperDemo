@@ -148,6 +148,7 @@
       <label class="inline">上下文窗口 (tokens)<input id="stCtx" type="number" min="1000" step="1000" placeholder="1000000"></label></div>
     <label class="check"><input type="checkbox" id="stStream" checked> 流式输出（逐字显示；个别网关不支持 SSE 时可关闭）</label>
     <label>分享链接的公网地址<span class="muted small">可选。你在局域网（如 NAS 的 192.168.x.x）里用 SuperDemo 时，外面的人打不开这个地址；填上指向这台服务器的域名或内网穿透地址（如 https://demo.example.com），分享链接就会用它</span><input id="stPublic" placeholder="https://demo.example.com"></label>
+    <label>新反馈推送到群<span class="muted small">可选。企业微信 / 飞书 / 钉钉群机器人的 Webhook 地址；访客一留反馈就推到群里（不含联系方式）</span><span class="row"><input id="stNotify" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…" style="flex:1"><button type="button" id="stNotifyTest" class="ghost">发条测试</button></span></label>
     <label class="check"><input type="checkbox" id="stDev"> 显示技术细节（端口、Token 用量、启停按钮、运行日志、文件）</label>
     <label>页面截图给模型<select id="stVision"><option value="auto">自动（先发送，模型不支持时自动关闭）</option><option value="on">总是发送</option><option value="off">不发送（只用页面结构文本）</option></select></label>
     <div id="stVisionState" class="small muted"></div>

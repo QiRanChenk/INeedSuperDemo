@@ -9,6 +9,7 @@ import { getTour, saveTour, generateTour, pageOptions } from './tour.js';
 import { getReport, makeReport, evidence, VERDICTS, currentRound, previousRound, startRound } from './report.js';
 import { makeSketch, cleanSketch } from './sketch.js';
 import { compareIdeas, adviseIdeas, getAdvice } from './compare.js';
+import { sendBot } from './notify.js';
 import { getPretest, runPretest, planWalks, continueWalk, pageList } from './personas.js';
 import { makePlan, normalizePlan, planToMessage } from './planner.js';
 import * as runner from './runner.js';
@@ -43,9 +44,15 @@ const publicSettings = s => ({
   projectLlm: { ...s.projectLlm, apiKey: maskKey(s.projectLlm.apiKey), hasKey: !!s.projectLlm.apiKey },
   effectiveProjectLlm: (() => { const e = getProjectLlm(s); return { ...e, apiKey: maskKey(e.apiKey), hasKey: !!e.apiKey }; })(),
 });
+app.post('/api/settings/notify-test', wrap(async (req, res) => {
+  const url = String(req.body?.url || getSettings().notifyWebhook || '').trim();
+  if (!/^https:\/\//.test(url)) return res.status(400).json({ error: '先填机器人地址（https:// 开头）' });
+  await sendBot(url, '【SuperDemo】测试消息：以后访客在分享链接上留下反馈，会推送到这里。');
+  res.json({ ok: true });
+}));
 app.get('/api/settings', (req, res) => res.json({ ...publicSettings(getSettings()), presets: PRESETS }));
 app.put('/api/settings', wrap(async (req, res) => {
-  const { baseUrl, apiKey, model, temperature, maxIterations, contextWindow, stream, projectLlm, vision, agentThinking, publicUrl } = req.body || {};
+  const { baseUrl, apiKey, model, temperature, maxIterations, contextWindow, stream, projectLlm, vision, agentThinking, publicUrl, notifyWebhook } = req.body || {};
   const before = JSON.stringify(getProjectLlm());
   const patch = {};
   if (projectLlm && typeof projectLlm === 'object') {
@@ -66,6 +73,7 @@ app.put('/api/settings', wrap(async (req, res) => {
   if (stream !== undefined) patch.stream = !!stream;
   if (['auto', 'on', 'off'].includes(vision)) patch.vision = vision;
   if (['on', 'off'].includes(agentThinking)) patch.agentThinking = agentThinking;
+  if (notifyWebhook !== undefined) { const u = String(notifyWebhook).trim(); if (u && !/^https:\/\/[^\s]+$/.test(u)) return res.status(400).json({ error: '机器人地址要以 https:// 开头（企业微信 / 飞书 / 钉钉群机器人的 Webhook 地址）' }); patch.notifyWebhook = u; }
   if (publicUrl !== undefined) { const u = normPublicUrl(publicUrl); if (String(publicUrl).trim() && !u) return res.status(400).json({ error: '分享地址要以 http:// 或 https:// 开头，如 https://demo.example.com' }); patch.publicUrl = u; }
   // model / endpoint / vision mode changed -> image support has to be detected again
   const cur = getSettings();
@@ -247,8 +255,15 @@ app.post('/api/projects/:id/shares', wrap(async (req, res) => {
   if (!readProject(id)) return res.status(404).json({ error: 'not found' });
   const share = createShare(id, req.body || {});
   setAutoStart(id, true); // a shared demo should stay reachable, also after the shell restarts
+  // first share: visitors will add and change data, so keep today's state as the demo data and restore it every night
+  // (only when the owner never decided about it, and not while the AI is editing the project)
+  let protectedData = false;
+  const p = readProject(id);
+  if (p.demoReset === undefined && !demoDataInfo(id).saved && !isBusy(id)) {
+    try { await saveDemoData(id); setDailyReset(id, true); protectedData = true; } catch (e) { console.warn('[share] demo data:', e.message); }
+  }
   await runner.start(id);
-  res.json(share);
+  res.json({ ...share, protectedData });
 }));
 app.delete('/api/projects/:id/shares/:token', wrap((req, res) => res.json(revokeShare(req.params.id, req.params.token))));
 app.patch('/api/projects/:id/shares/:token', wrap((req, res) => res.json(setShareOptions(req.params.id, req.params.token, req.body || {}))));

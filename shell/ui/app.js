@@ -462,6 +462,7 @@ async function loadSettings() {
   $('#stTemp').value = settings.temperature; $('#stIter').value = settings.maxIterations; $('#stCtx').value = settings.contextWindow; $('#stStream').checked = settings.stream !== false;
   $('#stVision').value = settings.vision || 'auto';
   $('#stPublic').value = settings.publicUrl || '';
+  $('#stNotify').value = settings.notifyWebhook || '';
   $('#stVisionState').textContent = settings.vision === 'auto' ? (settings.visionOk === true ? '已检测：当前模型支持图片' : settings.visionOk === false ? `已检测：当前模型不支持图片，只发送页面结构文本${settings.visionError ? `（${settings.visionError.slice(0, 120)}）` : ''}；如判断有误，把上面切到「总是发送」或重新保存即可重新检测` : '尚未检测（AI 第一次查看页面时自动判断）') : '';
   // project-side LLM
   const pl = settings.projectLlm;
@@ -495,9 +496,10 @@ function toggleSettings(open) {
   if (show) { $('#stResult').textContent = ''; $('#stpResult').textContent = ''; $('#stDev').checked = document.body.classList.contains('dev'); if (!dlg.open) dlg.showModal(); }
   else if (dlg.open) dlg.close();
 }
+$('#stNotifyTest').onclick = async () => { const r = $('#stResult'); r.textContent = '发送中…'; try { await api('/api/settings/notify-test', { method: 'POST', body: { url: $('#stNotify').value } }); r.textContent = '✓ 测试消息已发出，去群里看看'; } catch (e) { r.textContent = '✗ ' + e.message; } };
 $('#stDev').onchange = e => { setDev(e.target.checked); renderHeader(); };
 async function saveSettings() {
-  const body = { baseUrl: $('#stBase').value, model: $('#stModel').value, temperature: $('#stTemp').value, maxIterations: $('#stIter').value, contextWindow: $('#stCtx').value, stream: $('#stStream').checked, vision: $('#stVision').value, publicUrl: $('#stPublic').value, projectLlm: collectProjectLlm() };
+  const body = { baseUrl: $('#stBase').value, model: $('#stModel').value, temperature: $('#stTemp').value, maxIterations: $('#stIter').value, contextWindow: $('#stCtx').value, stream: $('#stStream').checked, vision: $('#stVision').value, publicUrl: $('#stPublic').value, notifyWebhook: $('#stNotify').value, projectLlm: collectProjectLlm() };
   if ($('#stKey').value) body.apiKey = $('#stKey').value;
   const saved = await api('/api/settings', { method: 'PUT', body });
   await loadSettings();
@@ -831,7 +833,7 @@ async function openShare() {
   for (const s of list) {
     const li = document.createElement('li'); li.className = s.active ? '' : 'revoked';
     const state = s.revoked ? '已关闭' : !s.active ? '已过期' : s.expiresAt ? `有效至 ${new Date(s.expiresAt).toLocaleString()}` : '永久有效';
-    li.innerHTML = `<div class="vmain"><div class="surl"></div><div class="muted small"></div><div class="sstats" hidden></div></div><button class="ghost stat">统计</button>${s.active ? `<label class="check small" title="访客页面右下角显示「💬 说说看法」按钮，可以表态、回答验证问题、留言"><input type="checkbox" class="fb"${s.feedback !== false ? ' checked' : ''}> 允许访客留言</label><button class="ghost copy">复制</button><button class="ghost danger off" title="让这个链接立即失效">停用链接</button>` : ''}`;
+    li.innerHTML = `<div class="vmain"><div class="surl"></div><div class="muted small"></div><div class="sstats" hidden></div></div><button class="ghost stat">统计</button>${s.active ? `<label class="check small" title="访客页面右下角显示「💬 说说看法」按钮，可以表态、回答验证问题、留言"><input type="checkbox" class="fb"${s.feedback !== false ? ' checked' : ''}> 允许访客留言</label><a class="ghost btn small open" target="_blank" rel="noopener" title="用访客的视角打开（含导览卡和说说看法按钮）">打开看看</a><button class="ghost copy">复制</button><button class="ghost danger off" title="让这个链接立即失效">停用链接</button>` : ''}`;
     li.querySelector('.stat').onclick = async () => {
       const box = li.querySelector('.sstats');
       if (!box.hidden) { box.hidden = true; return; }
@@ -844,6 +846,7 @@ async function openShare() {
     li.querySelector('.surl').textContent = shareUrl(s.token);
     li.querySelector('.small').textContent = [s.label, state, `打开 ${s.views || 0} 次`, s.lastViewAt ? `最近 ${new Date(s.lastViewAt).toLocaleString()}` : ''].filter(Boolean).join(' · ');
     if (s.active) {
+      if (li.querySelector('.open')) li.querySelector('.open').href = `/s/${s.token}/?_sdself=1`; // the owner's own look is not a visit
       li.querySelector('.copy').onclick = async e => { e.target.textContent = await copyText(shareUrl(s.token)) ? '已复制' : '复制失败'; };
       li.querySelector('.off').onclick = async () => { if (!confirm('停用后这个链接立即失效，拿到链接的人将打不开，确定？')) return; await api(`/api/projects/${id}/shares/${s.token}`, { method: 'DELETE' }); openShare(); };
     }
@@ -861,7 +864,7 @@ $('#shCreate').onclick = async () => {
     $('#shLabel').value = '';
     const ok = await copyText(shareUrl(s.token));
     await openShare(); loadProjects();
-    $('#shHint').textContent = ok ? '✓ 新链接已复制到剪贴板' : '链接已生成，请手动复制';
+    $('#shHint').textContent = (ok ? '✓ 新链接已复制到剪贴板' : '链接已生成，请手动复制') + (s.protectedData ? '。访客会改动 Demo 里的数据，已把现在的数据存为「演示数据」，每天凌晨 4 点自动恢复（可在下方「演示数据」里修改）' : '');
   } catch (e) { alert('生成失败：' + e.message); }
   finally { btn.disabled = false; }
 };

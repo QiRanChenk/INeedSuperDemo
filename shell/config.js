@@ -55,6 +55,7 @@ export function getSettings() {
     visionOk: typeof s.visionOk === 'boolean' ? s.visionOk : null, // auto-detected support of the current model
     visionError: s.visionError || '', // provider message that switched screenshots off
     // address that share links use (domain / tunnel), when the owner reaches SuperDemo over a LAN address
+    notifyWebhook: normPublicUrl(s.notifyWebhook ?? '') && /^https:/.test(s.notifyWebhook || '') ? String(s.notifyWebhook).trim() : '', // team-chat bot for new feedback
     publicUrl: normPublicUrl(s.publicUrl ?? process.env.SUPERDEMO_PUBLIC_URL ?? ''),
     // build agent reasoning: on = provider default (gateways often think by default), off = switch it off (much faster)
     agentThinking: ['on', 'off'].includes(s.agentThinking) ? s.agentThinking : 'on',
