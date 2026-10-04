@@ -62,7 +62,7 @@ function visitorInjection(share, token) {
   const withTour = tour?.enabled && tour.steps.length;
   if (share.feedback === false && !withTour) return false;
   return html => {
-    let out = share.feedback !== false ? injectFeedback(html, token) : html;
+    let out = share.feedback !== false ? injectFeedback(html, token, readProject(share.projectId)?.plan?.signals || []) : html;
     if (withTour) out = appendScript(out, tourScript(tour, token));
     return out;
   };
@@ -181,28 +181,36 @@ var xs=XMLHttpRequest.prototype.send;XMLHttpRequest.prototype.send=function(){wi
 
 /** visitor: share-link wording (no internal status words). */
 /** Floating "提意见" button for share-link visitors (shadow DOM so the demo's CSS can't break it, and vice versa). */
-export function injectFeedback(html, token) {
-  const tag = `<script>${feedbackWidget(token)}</script>`;
+export function injectFeedback(html, token, questions = []) {
+  const tag = `<script>${feedbackWidget(token, questions)}</script>`;
   const i = html.search(/<\/body>/i);
   return i >= 0 ? html.slice(0, i) + tag + html.slice(i) : html + tag;
 }
-function feedbackWidget(token) {
-  return `(function(){if(window.__sdFb)return;window.__sdFb=1;var host=document.createElement('div');host.style.cssText='position:fixed;right:16px;bottom:16px;z-index:2147483000';
-host.title='提意见';var r=host.attachShadow({mode:'open'});r.innerHTML='<style>*{box-sizing:border-box;font:14px/1.5 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}'
+// Validation widget: one-tap reaction + the plan's validation questions + free text. Shadow DOM isolates styles.
+function feedbackWidget(token, questions) {
+  const qs = JSON.stringify(questions.slice(0, 4).map(q => String(q).slice(0, 120))).replace(/</g, '\\u003c');
+  return `(function(){if(window.__sdFb)return;window.__sdFb=1;var QS=${qs};var host=document.createElement('div');host.title='说说看法';host.style.cssText='position:fixed;right:16px;bottom:16px;z-index:2147483000';
+var r=host.attachShadow({mode:'open'});function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+r.innerHTML='<style>*{box-sizing:border-box;font:14px/1.5 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}'
 +'.b{border:0;border-radius:999px;padding:10px 16px;background:#1f2430;color:#fff;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.25);opacity:.92}.b:hover{opacity:1}'
 +'@media (max-width:600px){.b{width:44px;height:44px;padding:0;font-size:0;opacity:.85}.b::before{content:"💬";font-size:20px}}'
-+'.p{position:absolute;right:0;bottom:52px;width:min(340px,calc(100vw - 32px));background:#fff;color:#1f2430;border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.25);padding:14px;display:none}'
-+'.p.o{display:block}h4{margin:0 0 4px;font-size:15px}p{margin:0 0 10px;color:#6b7280;font-size:12px}textarea,input{width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 10px;margin-bottom:8px;resize:vertical}'
-+'textarea{min-height:90px}.r{display:flex;gap:8px;justify-content:flex-end}.r button{border:1px solid #e5e7eb;background:#fff;border-radius:8px;padding:7px 14px;cursor:pointer}.r .s{background:#3b6cf6;border-color:#3b6cf6;color:#fff}.m{font-size:12px;color:#16a34a;margin-top:6px;min-height:16px}</style>'
-+'<div class="p"><h4>提意见</h4><p>这个功能好不好用、还缺什么，直接写下来</p><textarea placeholder="例如：希望能按日期筛选；这里的按钮在手机上点不到"></textarea><input placeholder="怎么称呼（可选）" maxlength="40"><div class="r"><button class="c">取消</button><button class="s">提交</button></div><div class="m"></div></div><button class="b">💬 提意见</button>';
-var p=r.querySelector('.p'),t=r.querySelector('textarea'),n=r.querySelector('input'),m=r.querySelector('.m'),s=r.querySelector('.s');
-r.querySelector('.b').onclick=function(){p.classList.toggle('o');if(p.classList.contains('o'))t.focus();};r.querySelector('.c').onclick=function(){p.classList.remove('o');};
-s.onclick=function(){var v=t.value.trim();if(!v){t.focus();return;}s.disabled=true;m.style.color='#6b7280';m.textContent='提交中…';
-fetch('/s/${token}/__sd/feedback',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:v,name:n.value,page:location.pathname.replace(/^\\/s\\/[^/]+/,'')+location.hash,viewport:innerWidth+'x'+innerHeight})})
-.then(function(x){return x.json().then(function(j){if(!x.ok)throw new Error(j.error||'提交失败');});}).then(function(){t.value='';m.style.color='#16a34a';m.textContent='已收到，谢谢！';setTimeout(function(){p.classList.remove('o');m.textContent='';},1500);})
++'.p{position:absolute;right:0;bottom:52px;width:min(360px,calc(100vw - 32px));max-height:min(560px,calc(100vh - 90px));overflow:auto;background:#fff;color:#1f2430;border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.25);padding:14px;display:none}'
++'.p.o{display:block}h4{margin:0 0 8px;font-size:15px}label{display:block;font-size:13px;color:#4b5563;margin:8px 0 4px}textarea,input{width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:7px 10px;resize:vertical}'
++'.rx{display:flex;gap:6px}.rx button{flex:1;border:1px solid #e5e7eb;background:#fff;border-radius:10px;padding:8px 4px;cursor:pointer}.rx button.on{border-color:#3b6cf6;background:#eef3ff;color:#1d4ed8;font-weight:600}'
++'.r{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}.r button{border:1px solid #e5e7eb;background:#fff;border-radius:8px;padding:7px 14px;cursor:pointer}.r .s{background:#3b6cf6;border-color:#3b6cf6;color:#fff}.m{font-size:12px;margin-top:6px;min-height:16px}</style>'
++'<div class="p"><h4>这个 Demo 对你有用吗？</h4><div class="rx"><button data-v="up">👍 有用</button><button data-v="meh">🤔 一般</button><button data-v="down">👎 用不上</button></div>'
++QS.map(function(q,i){return '<label>'+esc(q)+'</label><input data-q="'+i+'" placeholder="可选">';}).join('')
++'<label>还有什么想说的</label><textarea placeholder="例如：希望能按日期筛选；这里在手机上点不到"></textarea><input class="n" placeholder="怎么称呼（可选）" maxlength="40" style="margin-top:8px">'
++'<div class="r"><button class="c">取消</button><button class="s">提交</button></div><div class="m"></div></div><button class="b">💬 说说看法</button>';
+var p=r.querySelector('.p'),t=r.querySelector('textarea'),n=r.querySelector('.n'),m=r.querySelector('.m'),s=r.querySelector('.s'),rx='';
+r.querySelectorAll('.rx button').forEach(function(b){b.onclick=function(){rx=rx===b.dataset.v?'':b.dataset.v;r.querySelectorAll('.rx button').forEach(function(x){x.classList.toggle('on',x.dataset.v===rx);});};});
+r.querySelector('.b').onclick=function(){p.classList.toggle('o');};r.querySelector('.c').onclick=function(){p.classList.remove('o');};
+s.onclick=function(){var ans=[].map.call(r.querySelectorAll('[data-q]'),function(i){return {q:QS[+i.dataset.q],a:i.value.trim()};}).filter(function(x){return x.a;});
+var v=t.value.trim();if(!v&&!rx&&!ans.length){m.style.color='#dc2626';m.textContent='选一个看法或写一句话';return;}s.disabled=true;m.style.color='#6b7280';m.textContent='提交中…';
+fetch('/s/${token}/__sd/feedback',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({reaction:rx,answers:ans,text:v,name:n.value,page:location.pathname.replace(/^\\/s\\/[^/]+/,'')+location.hash,viewport:innerWidth+'x'+innerHeight})})
+.then(function(x){return x.json().then(function(j){if(!x.ok)throw new Error(j.error||'提交失败');});}).then(function(){t.value='';rx='';r.querySelectorAll('.rx button,[data-q]').forEach(function(x){x.classList.remove('on');if(x.value!==undefined&&x.dataset.q!==undefined)x.value='';});m.style.color='#16a34a';m.textContent='已收到，谢谢！';setTimeout(function(){p.classList.remove('o');m.textContent='';},1500);})
 .catch(function(e){m.style.color='#dc2626';m.textContent=e.message;}).finally(function(){s.disabled=false;});};
 (document.body||document.documentElement).appendChild(host);
-/* room below the last content so the button never permanently covers it */
 var pb=parseFloat(getComputedStyle(document.body).paddingBottom)||0;document.body.style.paddingBottom=(pb+72)+'px';})();`;
 }
 

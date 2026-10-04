@@ -8,10 +8,12 @@ import { SKELETONS, listProjects } from './registry.js';
 export const LOOKS = { clean: '干净通用', industrial: '工业现场', warm: '温暖服务', bold: '活力醒目', editorial: '克制专业', compact: '紧凑数据' };
 export const LAYOUTS = { topbar: '顶栏', sidebar: '侧边栏应用', tabbar: '手机底部标签', hero: '首屏横幅', board: '状态墙' };
 
-const SYSTEM = `你是资深的产品顾问，帮业务人员把一句话想法变成可以马上动手做的 Demo 方案。Demo 是一个 Web 应用（电脑和手机都能用），用于验证想法、给客户或同事演示。
+const SYSTEM = `你是资深的产品顾问，帮业务人员把一句话想法变成一个「验证用 Demo」的方案。它的目的不是做成能落地的系统，而是用最少的东西让目标用户一看就明白、亲手试一次，从而判断这个想法值不值得继续做。Demo 是 Web 页面（电脑和手机都能用）。
 只输出一个 JSON 对象，不要任何解释或代码块标记。字段：
 {
   "name": "项目名，具体、面向业务，不超过 10 个汉字，不带"系统/平台/Demo"后缀",
+  "hypothesis": "这个 Demo 要验证的核心假设，一句话，如：店长愿意每天花 1 分钟录库存来换取缺货预警",
+  "signals": ["问试用者的 2-3 个验证问题，用来判断假设是否成立，口语化，如：你现在怎么知道哪些货快卖完了？这个提醒能替代你现在的做法吗？"],
   "skeleton": "起步骨架，从 ${Object.keys(SKELETONS).join(' / ')} 中选最接近的：${Object.entries(SKELETONS).map(([k, v]) => `${k}=${v.label}（${v.fit}）`).join('；')}",
   "summary": "一句话说明这个 Demo 解决谁的什么问题",
   "users": ["使用者角色，1-3 个"],
@@ -31,7 +33,7 @@ const SYSTEM = `你是资深的产品顾问，帮业务人员把一句话想法�
   }]
 }
 designs 给 2-3 个明显不同的设计方向（设计语言、布局、专属元素都要有区别），第一个是最推荐的；它们必须来自对行业和使用场景的推导，不是随机风格，也不要只是换颜色。
-要求：这是第一版 Demo，只做最能体现价值的部分——页面 2-3 个、流程 2-4 条、数据对象 1-3 个，宁少勿滥（其余放进 outOfScope，以后再迭代）；不要写技术实现（数据库、接口、框架）；全部用中文。`;
+要求：这是验证版，只做 1 个核心场景——让人最快感受到价值的那一下（「啊哈时刻」）。页面 1-2 个、流程 1-3 条、数据对象 1-2 个；完整的增删改查、导出、权限、设置、统计报表等都放进 outOfScope，除非它就是核心价值。示例数据可以是预置的，但要贴近真实；不要写技术实现（数据库、接口、框架）；全部用中文。`;
 
 /** description -> plan object. Throws on LLM failure. */
 /** look+layout of the most recent plans, so the planner can steer away from repeating itself. */
@@ -70,6 +72,8 @@ export function normalizePlan(p = {}) {
     highlights: strList(p.highlights, 4),
     outOfScope: strList(p.outOfScope, 6),
     notes: String(p.notes || '').trim(),
+    hypothesis: String(p.hypothesis || '').trim().slice(0, 200),
+    signals: strList(p.signals, 4),
     designs: (Array.isArray(p.designs) ? p.designs : []).slice(0, 3).map(d => ({
       name: String(d?.name || '').trim().slice(0, 20), why: String(d?.why || '').trim().slice(0, 200),
       look: LOOKS[d?.look] ? d.look : 'clean',
@@ -95,10 +99,12 @@ export function planToMessage(plan, description) {
   const p = normalizePlan(plan);
   const sec = (title, lines) => (lines.length ? `## ${title}\n${lines.join('\n')}\n` : '');
   return [
-    `请按下面已经和用户确认的方案，把这个项目改造成可演示的 Demo（当前起步骨架：${SKELETONS[p.skeleton].label}，可以大胆改，不需要保留骨架里的示例业务）。`,
+    `请按下面已经和用户确认的方案，把这个项目改造成一个「验证用 Demo」（当前起步骨架：${SKELETONS[p.skeleton].label}，可以大胆改，不需要保留骨架里的示例业务，用不上的页面和代码直接删掉）。`,
+    '它的目的不是做成能落地的系统，而是让目标用户一看就懂、亲手试一次核心场景，从而判断想法是否成立。把核心那一下做到位、做得可信，其余一律从简。',
     `用户原话：${description}`,
     '',
     sec('目标', [p.summary].filter(Boolean)),
+    sec('要验证的假设', [p.hypothesis].filter(Boolean)),
     sec('使用者', p.users.map(x => `- ${x}`)),
     sec('页面', p.pages.map(x => `- ${x.name}：${x.purpose}`)),
     sec('数据', p.data.map(d => `- ${d.name}：${d.fields.join('、')}`)),
@@ -108,11 +114,11 @@ export function planToMessage(plan, description) {
     sec('这一版不做', p.outOfScope.map(x => `- ${x}`)),
     sec('设计方向（已确认）', chosenDesign(p) ? [...designText(chosenDesign(p)), '- 按 SDK 文档「设计方向要求」实现：先定布局和专属元素，颜色最后；不要套「标题 + 4 指标卡 + 表格」的固定模式，除非它确实是这个方向最好的表达。'] : []),
     sec('用户补充', [p.notes].filter(Boolean)),
-    '## 工作方式（请照做，效率优先，目标 40–60 步内完成）',
-    '1. 读骨架的 server.js 和页面文件了解结构（SDK 用法看系统提示里的文档，不要读 sdk/ 源码），然后一次写好后端：数据表 + 接口 + 示例数据。示例数据贴近业务即可，用 http_request 校验一次，不要反复打磨数值和分布。',
-    '2. 写页面：用组件库，每个页面一次写完整；方案外的功能不要加（想到的好点子写进最后的总结作为建议）。',
+    '## 工作方式（请照做，速度优先，目标 25 步左右、5 分钟内完成）',
+    '1. 快速看一眼骨架的 server.js 和页面（SDK 用法看系统提示里的文档，不要读 sdk/ 源码），然后一次写好后端：只要核心场景需要的表、接口和示例数据；示例数据贴近业务即可，用 http_request 校验一次，不要反复打磨。',
+    '2. 写页面：1-2 个页面，每个一次写完整；不做完整的增删改查、导出、权限、设置；方案外的功能不要加（想到的好点子写进总结作为下一步建议）。',
     '3. 用 page_view 看电脑效果、page_act 走通关键流程（弹窗里的字段用 label 定位，一次调用完成点开-填写-保存），再用 page_view 的 device="mobile" 看手机效果，有问题就修。',
     '4. 简短总结：做了什么、怎么演示、建议的下一步。',
-    '完成标准：每个页面都能用、关键流程能走通、有贴近业务的示例数据、电脑和手机都看过。',
+    '完成标准：核心场景能亲手走通一遍、数据看起来真实、电脑和手机都看过；不追求功能完整。',
   ].join('\n').replace(/\n{3,}/g, '\n\n');
 }

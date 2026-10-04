@@ -33,10 +33,11 @@ async function loadProjects() {
     wasBusy.set(p.id, p.busy);
   }
   if (current) { const fresh = projects.find(p => p.id === current.id); if (fresh) current = fresh; }
-  renderHeader();
+  renderHeader(); renderBoard();
 }
 
 async function select(id) {
+  document.body.classList.remove('view-board');
   if (isPhone()) setTab('chat'); // picking a project on a phone goes straight to its conversation
   if (current?.id === id) return;
   current = projects.find(p => p.id === id) || null;
@@ -138,7 +139,7 @@ async function loadUsage() {
 function renderHeader() {
   const has = !!current, busy = isBusy(current);
   const live = has && (current.status === 'running' || current.status === 'starting');
-  for (const id of ['btnToggle', 'btnLogs', 'btnFiles', 'btnVersions', 'btnShare', 'btnFeedback', 'btnMore', 'btnDuplicate', 'btnExport', 'btnDelete']) $('#' + id).disabled = !has;
+  for (const id of ['btnToggle', 'btnLogs', 'btnFiles', 'btnVersions', 'btnReport', 'btnShare', 'btnFeedback', 'btnMore', 'btnDuplicate', 'btnExport', 'btnDelete']) $('#' + id).disabled = !has;
   const fbn = has ? current.feedbackNew || 0 : 0;
   $('#fbBadge').hidden = !fbn; $('#fbBadge').textContent = fbn;
   $('#btnRestart').disabled = !live;
@@ -520,7 +521,8 @@ function showPlan(plan) {
   $('#ppSummary').value = plan.summary || '';
   ppList('pages', plan.pages.map(p => p.purpose ? `${p.name}：${p.purpose}` : p.name));
   ppList('data', plan.data.map(d => `${d.name}：${d.fields.join('、')}`));
-  ppList('flows', plan.flows); ppList('highlights', plan.highlights); ppList('outOfScope', plan.outOfScope);
+  ppList('flows', plan.flows); ppList('highlights', plan.highlights); ppList('outOfScope', plan.outOfScope); ppList('signals', plan.signals || []);
+  $('#ppHyp').value = plan.hypothesis || '';
   $('#ppSample').value = plan.sampleData || ''; $('#ppNotes').value = ''; $('#ppStatus').textContent = '';
   renderDesigns(plan.designs || [], plan.design || 0);
   npStep(2);
@@ -550,6 +552,7 @@ function readPlan() {
     flows: ppValues('flows'), sampleData: $('#ppSample').value.trim(), highlights: ppValues('highlights'), outOfScope: ppValues('outOfScope'),
     notes: $('#ppNotes').value.trim(),
     designs: lastPlan?.designs || [], design: planDesign,
+    hypothesis: $('#ppHyp').value.trim(), signals: ppValues('signals'),
   };
 }
 async function genPlan(statusEl) {
@@ -860,11 +863,80 @@ const firstLine = s => String(s ?? '').split('\n')[0].replace(/^\[系统\]\s*/, 
 
 $('#tokenStats').onclick = () => UsageDialog.open('today');
 
+// ---------- idea board (home): ideas move building -> ready -> validating -> concluded ----------
+const STAGES = [['building', '✍️', '制作中', '新想法在这里，AI 做好第一版就会往右移'], ['ready', '📤', '待分享', 'Demo 做好了：点卡片 → 分享，发给目标用户试'],
+  ['validating', '🧪', '验证中', '已分享，等试用者表态和回答验证问题'], ['concluded', '✅', '有结论', '证据够了就在「📊 验证」里生成结论']];
+function showBoard() { document.body.classList.add('view-board'); if (isPhone()) setTab('projects'); renderBoard(); }
+function renderBoard() {
+  if (!document.body.classList.contains('view-board')) return;
+  const cols = $('#boardCols'); cols.innerHTML = '';
+  for (const [stage, icon, title, hint] of STAGES) {
+    const list = projects.filter(p => (p.validation?.stage || 'building') === stage);
+    const col = document.createElement('div'); col.className = 'bcol';
+    col.innerHTML = `<div class="bcol-head">${icon} <b>${title}</b><span class="n">${list.length}</span></div>`;
+    if (!list.length) col.insertAdjacentHTML('beforeend', `<div class="bcol-empty">${hint}</div>`);
+    for (const p of list) {
+      const v = p.validation || {}, r = v.reactions || { up: 0, meh: 0, down: 0 }, total = r.up + r.meh + r.down;
+      const card = document.createElement('div'); card.className = 'icard';
+      card.innerHTML = `<div class="shot${v.thumb ? '' : ' none'}">${v.thumb ? '' : '◇'}</div><div class="body"><div class="name"><span class="dot ${p.status}"></span><span></span>${isBusy(p) ? '<span class="thinking small">⋯</span>' : ''}</div>
+        <div class="hyp"></div><div class="sig">${total ? `<span class="rxbar" title="👍 ${r.up} · 🤔 ${r.meh} · 👎 ${r.down}"><i style="width:${r.up / total * 100}%;background:#3fb950"></i><i style="width:${r.meh / total * 100}%;background:#d29922"></i><i style="width:${r.down / total * 100}%;background:#e5534b"></i></span>` : ''}
+        ${total ? `<span>👍${r.up} 🤔${r.meh} 👎${r.down}</span>` : ''}${v.feedback ? `<span>💬 ${v.feedback}</span>` : ''}${v.verdict ? `<span class="verdict ${v.verdict}">${esc(v.verdictLabel)}</span>` : ''}</div></div>`;
+      if (v.thumb) card.querySelector('.shot').style.backgroundImage = `url("/api/projects/${p.id}/shots/${v.thumb}")`;
+      card.querySelector('.name span:nth-child(2)').textContent = p.name;
+      card.querySelector('.hyp').textContent = v.hypothesis || p.description || '';
+      card.onclick = () => select(p.id, true);
+      col.appendChild(card);
+    }
+    cols.appendChild(col);
+  }
+}
+$('#bdNew').onclick = () => $('#newProject').click();
+$('#bdSettings').onclick = () => $('#openSettings').click();
+document.querySelector('.brand-text').style.cursor = 'pointer';
+document.querySelector('.brand-text').onclick = showBoard;
+
+// ---------- validation report ----------
+const VERDICT_NAMES = { support: '假设成立', partial: '部分成立', reject: '假设不成立', unclear: '样本不足' };
+async function openReport() {
+  const id = current.id;
+  $('#rpName').textContent = current.name;
+  $('#rpHyp').textContent = current.validation?.hypothesis ? '要验证：' + current.validation.hypothesis : '要验证：' + (current.description || '');
+  const { report, evidence: ev } = await api(`/api/projects/${id}/report`);
+  if (current?.id !== id) return;
+  renderReport(report, ev);
+  if (!$('#dlgReport').open) $('#dlgReport').showModal();
+}
+function renderReport(report, ev) {
+  const r = ev.reactions;
+  $('#rpStats').innerHTML = [['访客', ev.visitors], ['👍 有用', r.up], ['🤔 一般', r.meh], ['👎 用不上', r.down]].map(([k, v]) => `<div><span class="muted small">${k}</span><b>${v}</b></div>`).join('');
+  const qa = Object.entries(ev.answers || {});
+  let html = '';
+  if (report) {
+    const li = a => a.map(x => `<li>${esc(x)}</li>`).join('');
+    html += `<div class="rp-verdict"><h4><span class="verdict ${report.verdict}">${VERDICT_NAMES[report.verdict]}</span>${esc(report.summary)}</h4>
+      <div class="muted small">可信度 ${esc(report.confidence)} · 基于 ${report.stats.feedback} 条反馈 · ${new Date(report.ts).toLocaleString()}</div>
+      ${report.evidence.length ? `<div class="lbl">证据</div><ul>${li(report.evidence)}</ul>` : ''}${report.concerns.length ? `<div class="lbl">顾虑</div><ul>${li(report.concerns)}</ul>` : ''}${report.next.length ? `<div class="lbl">下一步</div><ul>${li(report.next)}</ul>` : ''}</div>`;
+  }
+  if (qa.length) html += `<div class="rp-qa">${qa.map(([q, as]) => `<p><b>${esc(q)}</b></p><ul>${as.slice(0, 8).map(a => `<li>${esc(a)}</li>`).join('')}</ul>`).join('')}</div>`;
+  if (!report && !ev.feedback) html += `<div class="muted small">还没有反馈。点「分享给目标用户」生成链接发出去，试用者在页面右下角就能表态、回答验证问题。</div>`;
+  $('#rpBody').innerHTML = html;
+  $('#rpGen').disabled = !ev.feedback; $('#rpInfo').textContent = '';
+}
+$('#btnReport').onclick = openReport;
+$('#rpClose').onclick = () => $('#dlgReport').close();
+$('#rpShare').onclick = () => { $('#dlgReport').close(); openShare(); };
+$('#rpGen').onclick = async () => {
+  const b = $('#rpGen'); b.disabled = true; $('#rpInfo').textContent = 'AI 正在根据证据写结论…';
+  try { const { report, evidence: ev } = await api(`/api/projects/${current.id}/report`, { method: 'POST' }); renderReport(report, ev); loadProjects(); }
+  catch (e) { $('#rpInfo').textContent = '✗ ' + e.message; b.disabled = false; }
+};
+
 // ---------- phone layout: bottom tabs switch between projects / chat / preview ----------
 const isPhone = () => matchMedia('(max-width: 760px)').matches;
 function setTab(t) {
   document.body.classList.remove('m-projects', 'm-chat', 'm-preview');
   document.body.classList.add('m-' + t);
+  if (t === 'projects') { document.body.classList.add('view-board'); renderBoard(); }
   if (t === 'chat') { const box = $('#messages'); box.scrollTop = box.scrollHeight; }
 }
 setTab('projects');
@@ -887,7 +959,7 @@ document.addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && !e.s
   setInterval(() => UsageDialog.refreshSummary(), 60000);
   await loadSettings();
   await loadProjects();
-  if (projects.length) await select(projects[0].id);
+  showBoard(); // home = idea board
   renderHeader();
   if (!settings.hasKey) toggleSettings(true);
   setInterval(loadProjects, 5000);

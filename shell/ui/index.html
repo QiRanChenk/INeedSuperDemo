@@ -10,7 +10,7 @@
 <body>
 <aside id="sidebar">
   <div class="brand"><span class="brand-text">⚡ SuperDemo <span class="ver">v0.1</span></span><button id="sbToggle" class="ghost sb-toggle" title="折叠侧栏 (⌘/Ctrl+B)" aria-label="折叠侧栏">«</button></div>
-  <button id="newProject" class="primary wide">+ 新建项目</button>
+  <button id="newProject" class="primary wide">＋ 新想法</button>
   <ul id="projectList" class="plist"></ul>
   <div class="spacer"></div>
   <button id="tokenStats" class="ghost wide stats-btn" title="点击查看 Token 消耗趋势">
@@ -33,6 +33,7 @@
     <div class="actions">
       <button id="btnToggle" class="ghost" title="启动/停止">■ 停止</button>
       <button id="btnRestart" class="ghost" title="重启">↻</button>
+      <button id="btnReport" class="ghost" title="试用表态、验证问题的回答和 AI 结论">📊 验证</button>
       <button id="btnVersions" class="ghost" title="每轮对话前自动保存的版本，可一键回滚">版本</button>
       <button id="btnShare" class="ghost" title="分享链接、演示数据、访问统计">分享</button>
       <button id="btnFeedback" class="ghost" title="别人通过分享链接留下的意见">反馈<span id="fbBadge" class="nbadge" hidden></span></button>
@@ -92,7 +93,7 @@
 <dialog id="dlgNew" class="plan-dlg">
   <div class="dlg">
     <section id="npStep1" class="dlg-step">
-      <h3>新建项目</h3>
+      <h3>新想法</h3>
       <label><span class="lbl">你想做什么？<span class="req">*</span><span class="muted">一两句话就行，AI 会先出一份方案给你确认</span></span>
         <textarea id="npDesc" rows="4" placeholder="例如：门店库存预警工具，店长录入商品和库存，低于阈值标红，AI 给补货建议"></textarea></label>
       <label>项目类型<select id="npType"></select></label>
@@ -103,6 +104,8 @@
       <div class="row between"><h3>确认方案</h3><span class="muted small">按需修改，确认后 AI 开始制作</span></div>
       <div class="row"><label class="inline">项目名称<input id="ppName" maxlength="20"></label><label class="inline">起步骨架<select id="ppSkeleton"></select></label></div>
       <label>目标<textarea id="ppSummary" rows="2"></textarea></label>
+      <label>要验证的假设<span class="muted small">这个 Demo 想证明什么</span><input id="ppHyp"></label>
+      <div class="pp-list" data-key="signals"><div class="pp-title">验证问题 <span class="muted">分享后问试用者，用来判断想法是否成立</span></div></div>
       <div class="pp-list" data-key="pages"><div class="pp-title">页面 <span class="muted">名称：能做什么</span></div></div>
       <div class="pp-list" data-key="data"><div class="pp-title">数据 <span class="muted">对象：字段（必填加 *）</span></div></div>
       <div class="pp-list" data-key="flows"><div class="pp-title">关键流程</div></div>
@@ -256,6 +259,25 @@
     <pre id="panelBody" class="panel"></pre>
   </div>
 </dialog>
+<!-- idea board: home view — every idea moves building → ready → validating → concluded -->
+<section id="board">
+  <header class="board-head">
+    <div><h2>想法看板</h2><div class="muted small">做出 Demo → 发给目标用户试 → 收集表态 → 得出结论。一个想法值不值得做，用证据说话。</div></div>
+    <div class="actions"><button id="bdSettings" class="ghost" title="模型设置">⚙</button><button id="bdNew" class="primary">＋ 新想法</button></div>
+  </header>
+  <div id="boardCols" class="board-cols"></div>
+</section>
+
+<dialog id="dlgReport" class="export-dlg">
+  <div class="dlg wide">
+    <div class="row between"><h3>验证 · <span id="rpName"></span></h3><button id="rpClose" class="ghost">关闭</button></div>
+    <div id="rpHyp" class="rp-hyp"></div>
+    <div id="rpStats" class="rp-stats"></div>
+    <div id="rpBody"></div>
+    <div class="row end"><span id="rpInfo" class="small muted" style="flex:1"></span><button id="rpShare" class="ghost">分享给目标用户</button><button id="rpGen" class="primary">生成 / 更新结论</button></div>
+  </div>
+</dialog>
+
 <!-- phone layout: one pane at a time, switched by this bar (hidden on wide screens) -->
 <nav id="mtabs" aria-label="切换视图">
   <button data-t="projects">☰<span>项目</span></button>

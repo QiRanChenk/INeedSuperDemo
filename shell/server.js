@@ -6,6 +6,7 @@ import { PROJECT_TYPES, SKELETONS, skeletonAvailable, listProjects, createProjec
 import { listFeedback, countNew, updateFeedback, deleteFeedback, feedbackToMessage } from './feedback.js';
 import { demoDataInfo, saveDemoData, restoreDemoData, setDailyReset, runDailyResets } from './demodata.js';
 import { getTour, saveTour, generateTour } from './tour.js';
+import { getReport, makeReport, evidence, VERDICTS } from './report.js';
 import { makePlan, normalizePlan, planToMessage } from './planner.js';
 import * as runner from './runner.js';
 import { proxyMiddleware, proxyUpgrade, shareMiddleware, upgradeTarget } from './proxy.js';
@@ -85,7 +86,7 @@ const withStatus = p => ({ ...p, ...runner.status(p.id), busy: isBusy(p.id), typ
 app.get('/api/project-types', (req, res) => res.json(Object.entries(PROJECT_TYPES).map(([id, t]) => ({ id, label: t.label, available: !!t.template }))));
 // most recently chatted first; never-chatted projects fall back to creation time
 app.get('/api/projects', (req, res) => res.json(listProjects()
-  .map(p => ({ ...withStatus(p), lastChatAt: lastChatAt(p.id), feedbackNew: countNew(p.id) }))
+  .map(p => ({ ...withStatus(p), lastChatAt: lastChatAt(p.id), feedbackNew: countNew(p.id), validation: validationOf(p) }))
   .sort((a, b) => String(b.lastChatAt || b.createdAt).localeCompare(String(a.lastChatAt || a.createdAt)))));
 app.get('/api/skeletons', (req, res) => res.json(Object.entries(SKELETONS).map(([id, k]) => ({ id, label: k.label, fit: k.fit, available: skeletonAvailable(id) }))));
 // plan first: one-line request -> editable plan (nothing is created yet)
@@ -175,6 +176,19 @@ app.post('/api/projects/:id/feedback/message', wrap((req, res) => {
   if (!items.length) return res.status(400).json({ error: '请先选择反馈' });
   res.json({ message: feedbackToMessage(items) });
 }));
+
+// ---- idea validation: stage + signals for the idea board, and the AI verdict report ----
+function validationOf(p) {
+  const fb = listFeedback(p.id), reactions = { up: 0, meh: 0, down: 0 };
+  for (const f of fb) if (f.reaction) reactions[f.reaction]++;
+  const report = getReport(p.id), shares = listShares(p.id).filter(s => s.active).length, chatted = !!lastChatAt(p.id);
+  const stage = isBusy(p.id) || !chatted ? 'building' : report ? 'concluded' : shares ? 'validating' : 'ready';
+  let thumb = null;
+  try { thumb = fs.readdirSync(path.join(ROOT, 'projects', p.id, '.superdemo', 'shots')).filter(f => f.endsWith('.jpg') && !f.endsWith('-m.jpg')).sort().pop() || null; } catch {} // desktop shots only
+  return { stage, hypothesis: p.plan?.hypothesis || '', reactions, feedback: fb.length, shares, verdict: report?.verdict || null, verdictLabel: report ? VERDICTS[report.verdict] : null, thumb };
+}
+app.get('/api/projects/:id/report', wrap((req, res) => res.json({ report: getReport(req.params.id), evidence: evidence(req.params.id) })));
+app.post('/api/projects/:id/report', wrap(async (req, res) => res.json({ report: await makeReport(req.params.id), evidence: evidence(req.params.id) })));
 
 // ---- visitor tour (shown on share links) ----
 app.get('/api/projects/:id/tour', wrap((req, res) => res.json(getTour(req.params.id) || { enabled: false, title: '', intro: '', steps: [] })));

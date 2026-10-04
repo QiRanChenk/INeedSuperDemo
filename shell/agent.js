@@ -314,13 +314,13 @@ export function resolveBrowser(id, reqId, result) {
 
 // screenshots are files (history only keeps the name); the two most recent ones in the kept turns are sent to the model
 const shotsDir = id => path.join(projectDir(id), '.superdemo', 'shots');
-export function shotPath(id, file) { return /^[a-z0-9]+\.jpg$/.test(file) ? path.join(shotsDir(id), file) : null; }
-function saveShot(id, dataUrl) {
+export function shotPath(id, file) { return /^[a-z0-9]+(-m)?\.jpg$/.test(file) ? path.join(shotsDir(id), file) : null; }
+function saveShot(id, dataUrl, mobile = false) {
   const m = /^data:image\/jpeg;base64,(.+)$/.exec(dataUrl || '');
   if (!m) return null;
   const dir = shotsDir(id);
   fs.mkdirSync(dir, { recursive: true });
-  const file = Date.now().toString(36) + Math.random().toString(36).slice(2, 5) + '.jpg';
+  const file = Date.now().toString(36) + Math.random().toString(36).slice(2, 5) + (mobile ? '-m' : '') + '.jpg'; // -m: phone-size shot
   fs.writeFileSync(path.join(dir, file), Buffer.from(m[1], 'base64'));
   const all = fs.readdirSync(dir).filter(f => f.endsWith('.jpg')).sort();
   for (const f of all.slice(0, Math.max(0, all.length - 40))) fs.rmSync(path.join(dir, f), { force: true });
@@ -469,7 +469,7 @@ async function execTool(project, name, args, ctx) {
       let text = r.text;
       const web = webErrorsSince(id, t0 - 1);
       if (web.length) { text += `\n\n浏览器报错（${web.length} 条）：\n${web.slice(-8).join('\n')}`; ctx.markWebSeen(); }
-      const file = r.image && saveShot(id, r.image);
+      const file = r.image && saveShot(id, r.image, args.device === 'mobile');
       if (file) { ctx.images.push({ file, info: r.imageInfo }); text += `\n\n[${r.imageInfo}，见后面的截图消息]`; }
       else if (r.imageInfo) text += `\n\n[${r.imageInfo}]`;
       return text;
@@ -551,7 +551,7 @@ function endSnapshot(id, snap) {
 }
 
 const STOP_NOTE = '（用户已停止本轮处理）';
-const SOFT_STEPS = 60;
+const SOFT_STEPS = 40; // validation demos should be done well before this
 
 async function runAgentInner(project, userMessage, run, sid) {
   const id = project.id;
