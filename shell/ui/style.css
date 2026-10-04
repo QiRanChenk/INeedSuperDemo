@@ -313,3 +313,9 @@ table.cmp .sim { color: #a78bfa; }
   table.cmp td:nth-child(5)::before { content: '留联系方式 '; color: var(--muted); } table.cmp td:nth-child(6)::before { content: '👍 占比 '; color: var(--muted); }
   table.cmp td:nth-child(7)::before { content: '结论 '; color: var(--muted); }
 }
+@media (max-width: 760px) {
+  /* report on a phone: compact numbers, verdict wraps under its badge, actions always reachable */
+  .rp-stats { grid-template-columns: repeat(4, 1fr) !important; gap: 6px; } .rp-stats div { padding: 6px 8px; } .rp-stats b { font-size: 16px; } .rp-stats span { font-size: 11px; }
+  .rp-verdict h4 { flex-wrap: wrap; } .rp-hyp { font-size: 14px; }
+  #dlgReport .row.end { position: sticky; bottom: -1px; background: var(--panel); padding: 8px 0; flex-wrap: wrap; justify-content: flex-start; z-index: 1; }
+}

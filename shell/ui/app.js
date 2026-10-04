@@ -1167,7 +1167,8 @@ function renderRound(round, prev) {
 function renderReport(report, ev) {
   const r = ev.reactions;
   const secs = ev.medianMs != null ? Math.round(ev.medianMs / 1000) : null;
-  $('#rpStats').innerHTML = [['访客', ev.visitors], ['真动手的人', ev.actors ?? 0, '在 Demo 里真的提交、保存过东西的访客'], ['留联系方式', ev.contacts ?? 0, '点了「有用」并留下微信/手机号、想上线后第一时间用上的人'], ['一般看多久', secs == null ? '–' : secs >= 100 ? `${Math.round(secs / 6) / 10}分` : `${secs}秒`], ['👍 有用', r.up], ['🤔 一般', r.meh], ['👎 用不上', r.down]]
+  const reactedN = r.up + r.meh + r.down;
+  $('#rpStats').innerHTML = [['访客', ev.visitors >= reactedN ? ev.visitors : `≥${reactedN}`], ['真动手的人', ev.actors ?? 0, '在 Demo 里真的提交、保存过东西的访客'], ['留联系方式', ev.contacts ?? 0, '点了「有用」并留下微信/手机号、想上线后第一时间用上的人'], ['一般看多久', secs == null ? '–' : secs >= 100 ? `${Math.round(secs / 6) / 10}分` : `${secs}秒`], ['👍 有用', r.up], ['🤔 一般', r.meh], ['👎 用不上', r.down]]
     .map(([k, v, t]) => `<div${t ? ` title="${t}"` : ''}><span class="muted small">${k}</span><b>${v}</b></div>`).join('');
   const qa = Object.entries(ev.answers || {});
   let html = '';
