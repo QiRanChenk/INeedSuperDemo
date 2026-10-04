@@ -9,7 +9,7 @@ import { getTour, saveTour, generateTour, pageOptions } from './tour.js';
 import { getReport, makeReport, evidence, VERDICTS, currentRound, previousRound, startRound } from './report.js';
 import { makeSketch, cleanSketch } from './sketch.js';
 import { compareIdeas, adviseIdeas, getAdvice } from './compare.js';
-import { sendBot } from './notify.js';
+import { sendBot, runDigest } from './notify.js';
 import { getPretest, runPretest, planWalks, continueWalk, pageList } from './personas.js';
 import { makePlan, normalizePlan, planToMessage } from './planner.js';
 import * as runner from './runner.js';
@@ -419,6 +419,8 @@ async function boot() {
   for (const p of projects) if (p.autoStart !== false) runner.start(p.id).catch(e => console.error(`[boot] ${p.id}:`, e.message));
   // daily demo-data reset (checked every 10 minutes; runs once a day after 04:00 local time)
   setInterval(() => runDailyResets(listProjects(), isBusy).catch(e => console.error('[demo-data]', e.message)), 10 * 60_000).unref();
+  // evening digest of the day's validation activity to the team-chat bot (if set)
+  setInterval(() => runDigest().catch(e => console.warn('[digest]', e.message)), 10 * 60_000).unref();
   const server = app.listen(PORT, HOST, () => {
     const s = getSettings();
     console.log(`\n  SuperDemo 壳已启动:  http://${isLoopbackHost(HOST) ? 'localhost' : HOST}:${PORT}${passwordEnabled() ? '  (已启用访问口令)' : ''}`);
