@@ -25,3 +25,8 @@ test('sendBot posts JSON and surfaces bot error codes', async () => {
   await assert.rejects(sendBot(url, 'bad'), /invalid webhook url/);
   srv.close();
 });
+
+test('feedbackText strips bot mention syntax from visitor text', () => {
+  const t = feedbackText({ name: 'x' }, { text: '大家看 <at user_id="all"></at> @所有人 <@123>', name: '@all' });
+  assert.ok(!/<at|@所有人|<@|@all/i.test(t), t);
+});

@@ -16,7 +16,7 @@ export function listFeedback(id) { return readAll(id).reverse(); }
 export const countNew = id => readAll(id).filter(f => f.status === 'new').length;
 
 export const REACTIONS = { up: '👍 有用', meh: '🤔 一般', down: '👎 用不上' };
-export function addFeedback(id, { text, name, page, viewport, share, reaction, answers, contact, bug }) {
+export function addFeedback(id, { text, name, page, viewport, share, reaction, answers, contact, bug, questions }) {
   const f = {
     id: 'f' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
     ts: Date.now(), status: 'new',
@@ -28,7 +28,8 @@ export function addFeedback(id, { text, name, page, viewport, share, reaction, a
     reaction: ['up', 'meh', 'down'].includes(reaction) ? reaction : '',
     bug: !!bug, // "something's broken": a defect report about the demo, kept apart from the validation evidence
     contact: reaction === 'up' ? String(contact || '').trim().slice(0, 60) : '', // owner-only; never sent to the LLM
-    answers: (Array.isArray(answers) ? answers : []).slice(0, 4).map(x => ({ q: String(x?.q || '').slice(0, 120), a: String(x?.a || '').trim().slice(0, 500) })).filter(x => x.a),
+    // only answers to the plan's own questions (when known): a visitor can't invent "questions" that land in prompts
+    answers: (Array.isArray(answers) ? answers : []).slice(0, 4).map(x => ({ q: String(x?.q || '').slice(0, 120), a: String(x?.a || '').trim().slice(0, 500) })).filter(x => x.a && (!questions?.length || questions.map(q => String(q).slice(0, 120)).includes(x.q))),
   };
   if (!f.text && !f.reaction && !f.answers.length) throw new Error('请选一个看法或写下你的建议');
   fs.mkdirSync(path.dirname(file(id)), { recursive: true });

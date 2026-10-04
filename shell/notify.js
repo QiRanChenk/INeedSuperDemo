@@ -27,7 +27,8 @@ export function feedbackText(project, f, link) {
     f.name ? `—— ${f.name}` : '',
     link ? `查看：${link}` : '',
   ];
-  return lines.filter(Boolean).join('\n');
+  // visitor text must not @everyone in the group: drop the bots' mention syntax
+  return lines.filter(Boolean).join('\n').replace(/<\/?at\b[^>]*>|<@[^>]*>|@(所有人|全体成员|(all|everyone)(?![a-z]))/gi, '');
 }
 
 export async function sendBot(url, text) {

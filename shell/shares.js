@@ -61,9 +61,14 @@ export function recordView(token, visitor = '', page = '/') {
   if (!s) return;
   s.views = (s.views || 0) + 1; s.lastViewAt = Date.now();
   writeAll(list);
+  appendLog({ t: Date.now(), k: token, v: String(visitor).slice(0, 32), p: String(page).slice(0, 120) });
+}
+
+/** Every write to the visit log goes through here, so it stays bounded (a hammered link must not fill the disk). */
+function appendLog(row) {
   try {
-    fs.appendFileSync(VIEWS, JSON.stringify({ t: Date.now(), k: token, v: String(visitor).slice(0, 32), p: String(page).slice(0, 120) }) + '\n');
-    // keep the log bounded (a hammered link must not fill the disk): past 5 MB keep the newest half
+    fs.appendFileSync(VIEWS, JSON.stringify(row) + '\n');
+    // past 5 MB keep the newest half (checked on ~2% of writes)
     if (Math.random() < 0.02 && fs.statSync(VIEWS).size > 5_000_000) {
       const lines = fs.readFileSync(VIEWS, 'utf8').split('\n').filter(Boolean);
       fs.writeFileSync(VIEWS, lines.slice(-Math.floor(lines.length / 2)).join('\n') + '\n');
@@ -73,8 +78,14 @@ export function recordView(token, visitor = '', page = '/') {
 
 /** Behaviour of share-link visitors, same log as views: e='a' = a write request (they actually did something:
  *  submit / save / book …), e='d' = visible time on a page (ms), sent by the injected script when the page is hidden. */
+const eventRate = new Map();
 export function recordEvent(token, visitor, e, data) {
-  try { fs.appendFileSync(VIEWS, JSON.stringify({ t: Date.now(), k: token, v: String(visitor).slice(0, 32), e, ...data }) + '\n'); } catch {}
+  // per visitor and link: at most 60 events a minute (pings and writes); more is a script, not a person
+  const k = token + ':' + visitor + ':' + Math.floor(Date.now() / 60_000);
+  const n = (eventRate.get(k) || 0) + 1; eventRate.set(k, n);
+  if (eventRate.size > 5000) eventRate.clear();
+  if (n > 60) return;
+  appendLog({ t: Date.now(), k: token, v: String(visitor).slice(0, 32), e, ...data });
 }
 
 export function setShareOptions(projectId, token, { feedback }) {

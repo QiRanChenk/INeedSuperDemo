@@ -8,6 +8,7 @@ import { feedbackScript } from './feedback-widget.js';
 import { notifyFeedback } from './notify.js';
 import { addFeedback } from './feedback.js';
 import { getTour, tourScript } from './tour.js';
+import { checkRequest } from './auth.js';
 
 const PATH_RE = /^\/p\/([a-z0-9-]+)(\/.*)?$/;
 const SHARE_RE = /^\/s\/([A-Za-z0-9_-]+)(\/.*)?$/;
@@ -40,18 +41,15 @@ export function shareMiddleware(req, res) {
   if (m[2] === undefined) return res.redirect(302, `/s/${m[1]}/`);
   if (m[2].startsWith('/__sd/feedback')) return handleFeedback(req, res, share);
   // the owner previewing via 「打开看看」 (?_sdself=1, remembered in a cookie for this link) is not counted as a visitor
-  const self = /(?:^|;\s*)sdself=1/.test(req.headers.cookie || '') || /[?&]_sdself=1\b/.test(m[2] || '');
-  if (/[?&]_sdself=1\b/.test(m[2] || '')) res.appendHeader('set-cookie', `sdself=1; Path=/s/${m[1]}/; Max-Age=31536000; SameSite=Lax; HttpOnly`);
+  // (only honoured for the owner: a request that would pass the shell's own access check)
+  const asksSelf = /[?&]_sdself=1\b/.test(m[2] || '') && !checkRequest(req);
+  const self = asksSelf || (/(?:^|;\s*)sdself=1/.test(req.headers.cookie || '') && !checkRequest(req));
+  if (asksSelf) res.appendHeader('set-cookie', `sdself=1; Path=/s/${m[1]}/; Max-Age=31536000; SameSite=Lax; HttpOnly`);
   const visitorId = self ? null : /(?:^|;\s*)sdv=([A-Za-z0-9_-]{8,32})/.exec(req.headers.cookie || '')?.[1];
   if (m[2].startsWith('/__sd/ping')) return handlePing(req, res, share, visitorId);
   // a visitor who sends a write request has actually used the demo (submitted, saved, booked …)
   // (only successful ones: a rejected form is not a completed action)
-  if (visitorId && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
-    // what they typed is evidence too (real business data vs "test 123"); first 2 KB, read alongside the proxying
-    let raw = '';
-    req.on('data', c => { if (raw.length < 2048) raw += c.toString('utf8', 0, 2048 - raw.length); });
-    res.on('finish', () => { if (res.statusCode < 400) recordEvent(share.token, visitorId, 'a', { a: `${req.method} ${m[2].split('?')[0].slice(0, 100)}`, b: inputSnippet(raw) }); });
-  }
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return shareWrite(req, res, project, share, m, visitorId);
   const st = status(project.id).status;
   if (st !== 'running') {
     if (st !== 'starting') start(project.id).catch(() => {});
@@ -84,6 +82,43 @@ function visitorInjection(share, token) {
 }
 const appendScript = (html, js) => { const i = html.search(/<\/body>/i), tag = `<script>${js}</script>`; return i >= 0 ? html.slice(0, i) + tag + html.slice(i) : html + tag; };
 
+// Anonymous visitors' writes are buffered and screened before they reach the demo: markup in their input could become
+// stored XSS in a demo that renders it with innerHTML, and demo pages share the shell's origin (the owner's preview
+// would run it). Demos are prototypes: plain text is all a visitor needs to type.
+const MAX_WRITE = 8 * 1024 * 1024;
+const MARKUP = /<\s*[a-zA-Z!\/?]|javascript\s*:|vbscript\s*:|data:\s*text\/html|\bon[a-z]{3,}\s*=|\bsrcdoc\s*=/i;
+export function hasMarkup(raw, type = '') {
+  const strings = [];
+  const walk = v => { if (typeof v === 'string') strings.push(v); else if (v && typeof v === 'object') for (const x of Object.values(v)) walk(x); };
+  if (/json/i.test(type)) { try { walk(JSON.parse(raw)); } catch { strings.push(raw); } }
+  else if (/x-www-form-urlencoded/i.test(type)) { try { for (const [k, v] of new URLSearchParams(raw)) strings.push(k, v); } catch { strings.push(raw); } }
+  else if (/multipart\/form-data/i.test(type)) {
+    // skip the bytes of real raster images; everything else (fields, svg, html, text files) is screened
+    for (const part of raw.split(/\r?\n--[^\r\n]+/)) {
+      const [head, ...body] = part.split(/\r?\n\r?\n/);
+      if (/filename=/i.test(head) && /content-type:\s*image\/(png|jpe?g|gif|webp|bmp|heic|avif)/i.test(head)) continue;
+      strings.push(head, body.join('\n\n'));
+    }
+  } else strings.push(raw);
+  return strings.some(s => MARKUP.test(s));
+}
+
+function shareWrite(req, res, project, share, m, visitorId) {
+  const chunks = []; let size = 0, tooBig = false;
+  req.on('data', c => { size += c.length; if (size > MAX_WRITE) { tooBig = true; req.destroy(); } else chunks.push(c); });
+  req.on('end', () => {
+    if (tooBig) return res.status(413).json({ error: '提交的内容太大了' });
+    const body = Buffer.concat(chunks), type = req.headers['content-type'] || '';
+    const text = /multipart/i.test(type) ? body.toString('latin1') : body.toString('utf8');
+    if (hasMarkup(text, type)) return res.status(400).json({ error: '内容里不能包含网页代码（如 <标签>、javascript:），请换个写法' });
+    // a visitor who sends a write request has actually used the demo (submitted, saved, booked …); only successful
+    // ones count, and what they typed is evidence too (real business data vs "test 123")
+    if (visitorId) res.on('finish', () => { if (res.statusCode < 400) recordEvent(share.token, visitorId, 'a', { a: `${req.method} ${m[2].split('?')[0].slice(0, 100)}`, b: /multipart/i.test(type) ? '（上传了文件）' : inputSnippet(body.toString('utf8', 0, 2048)) }); });
+    forward(req, res, project, m[2], { prefix: `/s/${m[1]}`, inject: false, body });
+  });
+  req.on('error', () => { if (!res.headersSent) res.status(400).end(); });
+}
+
 /** Readable gist of a visitor's form submission: "名称=青菜 进价=1.2"; long digit runs (phone numbers) masked. */
 export function inputSnippet(raw) {
   let j; try { j = JSON.parse(raw); } catch { try { j = Object.fromEntries(new URLSearchParams(raw)); } catch { return ''; } }
@@ -95,7 +130,7 @@ export function inputSnippet(raw) {
     if (t && !/^data:/.test(t) && t.length < 300) parts.push(`${k}=${t.slice(0, 60)}`);
   };
   walk(j, '');
-  return parts.join(' ').replace(/\d{7,}/g, d => d.slice(0, 3) + '****' + d.slice(-2)).slice(0, 300);
+  return parts.join(' ').replace(/\d[\d -]{5,}\d/g, m => { const d = m.replace(/\D/g, ''); return d.length >= 7 ? d.slice(0, 3) + '****' + d.slice(-2) : m; }).slice(0, 300);
 }
 
 // time on page: POST /s/<token>/__sd/ping { ms, page } (sendBeacon when the page is hidden); visitors with a cookie only
@@ -116,29 +151,33 @@ document.addEventListener('visibilitychange',function(){if(document.visibilitySt
 const feedbackRate = new Map();
 function handleFeedback(req, res, share) {
   if (req.method !== 'POST') return res.status(405).end();
+  // counted before the work (concurrent requests can't slip past): 60 per link per hour, 5 per visitor per hour
   const hour = Math.floor(Date.now() / 3_600_000), key = share.token + ':' + hour;
-  if ((feedbackRate.get(key) || 0) >= 30) return res.status(429).json({ error: '提交太频繁，请稍后再试' });
+  const who = key + ':' + (/(?:^|;\s*)sdv=([A-Za-z0-9_-]{8,32})/.exec(req.headers.cookie || '')?.[1] || req.socket.remoteAddress || '');
+  const nLink = (feedbackRate.get(key) || 0) + 1, nWho = (feedbackRate.get(who) || 0) + 1;
+  feedbackRate.set(key, nLink); feedbackRate.set(who, nWho);
+  if (feedbackRate.size > 5000) feedbackRate.clear();
+  if (nLink > 60 || nWho > 5) return res.status(429).json({ error: '提交太频繁，请稍后再试' });
   let body = '';
   req.on('data', c => { body += c; if (body.length > 20_000) req.destroy(); });
   req.on('end', () => {
     try {
       const b = JSON.parse(body || '{}');
-      const f = addFeedback(share.projectId, { ...b, share });
+      const f = addFeedback(share.projectId, { ...b, share, questions: readProject(share.projectId)?.plan?.signals || [] });
       try { notifyFeedback(readProject(share.projectId), f); } catch {}
-      feedbackRate.set(key, (feedbackRate.get(key) || 0) + 1);
-      if (feedbackRate.size > 1000) feedbackRate.clear();
       res.json({ ok: true });
     } catch (e) { res.status(400).json({ error: e.message || '提交失败' }); }
   });
 }
 
 /** inject: true -> agent error reporter; a function html => html -> custom injection; false -> untouched. */
-function forward(req, res, project, rest, { prefix, inject, onPage }) {
+function forward(req, res, project, rest, { prefix, inject, onPage, body }) {
   const st = status(project.id).status;
   if (st !== 'running' && st !== 'starting') {
     return res.status(503).send(waitingPage(project, st));
   }
   const headers = { ...req.headers, host: `127.0.0.1:${project.port}`, 'x-forwarded-prefix': prefix };
+  if (body) { headers['content-length'] = String(body.length); delete headers['transfer-encoding']; }
   delete headers['accept-encoding']; // keep HTML uncompressed so scripts can be injected
   delete headers.authorization;      // the shell's credentials are not the project's business
   const upstream = http.request({ host: '127.0.0.1', port: project.port, method: req.method, path: rest, headers }, up => {
@@ -167,7 +206,7 @@ function forward(req, res, project, rest, { prefix, inject, onPage }) {
     if (!res.headersSent) res.status(502).send(waitingPage(project, 'unreachable: ' + err.message));
     else res.end();
   });
-  req.pipe(upstream);
+  if (body) upstream.end(body); else req.pipe(upstream);
 }
 
 /** Project + upstream path for an upgrade request on /p/:id/… (shell access already checked) or /s/:token/…. */
