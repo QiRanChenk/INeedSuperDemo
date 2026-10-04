@@ -217,16 +217,17 @@ r.innerHTML='<style>*{box-sizing:border-box;font:14px/1.5 system-ui,-apple-syste
 +'.rx{display:flex;gap:6px}.rx button{flex:1;border:1px solid #e5e7eb;background:#fff;border-radius:10px;padding:8px 4px;cursor:pointer}.rx button.on{border-color:#3b6cf6;background:#eef3ff;color:#1d4ed8;font-weight:600}'
 +'.r{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}.r button{border:1px solid #e5e7eb;background:#fff;border-radius:8px;padding:7px 14px;cursor:pointer}.r .s{background:#3b6cf6;border-color:#3b6cf6;color:#fff}.m{font-size:12px;margin-top:6px;min-height:16px}</style>'
 +'<div class="p"><h4>这个 Demo 对你有用吗？</h4><div class="rx"><button data-v="up">👍 有用</button><button data-v="meh">🤔 一般</button><button data-v="down">👎 用不上</button></div>'
++'<div class="ct" hidden><label>真上线了想第一时间用上？留个微信或手机号（可选）</label><input class="cv" maxlength="60" placeholder="只给做这个产品的人看"></div>'
 +QS.map(function(q,i){return '<label>'+esc(q)+'</label><input data-q="'+i+'" placeholder="可选">';}).join('')
 +'<label>还有什么想说的</label><textarea placeholder="例如：希望能按日期筛选；这里在手机上点不到"></textarea><input class="n" placeholder="怎么称呼（可选）" maxlength="40" style="margin-top:8px">'
 +'<div class="r"><button class="c">取消</button><button class="s">提交</button></div><div class="m"></div></div><button class="b">💬 说说看法</button>';
 var p=r.querySelector('.p'),t=r.querySelector('textarea'),n=r.querySelector('.n'),m=r.querySelector('.m'),s=r.querySelector('.s'),rx='';
-r.querySelectorAll('.rx button').forEach(function(b){b.onclick=function(){rx=rx===b.dataset.v?'':b.dataset.v;r.querySelectorAll('.rx button').forEach(function(x){x.classList.toggle('on',x.dataset.v===rx);});};});
+r.querySelectorAll('.rx button').forEach(function(b){b.onclick=function(){rx=rx===b.dataset.v?'':b.dataset.v;r.querySelectorAll('.rx button').forEach(function(x){x.classList.toggle('on',x.dataset.v===rx);});r.querySelector('.ct').hidden=rx!=='up';};});
 r.querySelector('.b').onclick=function(){p.classList.toggle('o');};r.querySelector('.c').onclick=function(){p.classList.remove('o');};
 s.onclick=function(){var ans=[].map.call(r.querySelectorAll('[data-q]'),function(i){return {q:QS[+i.dataset.q],a:i.value.trim()};}).filter(function(x){return x.a;});
 var v=t.value.trim();if(!v&&!rx&&!ans.length){m.style.color='#dc2626';m.textContent='选一个看法或写一句话';return;}s.disabled=true;m.style.color='#6b7280';m.textContent='提交中…';
-fetch('/s/${token}/__sd/feedback',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({reaction:rx,answers:ans,text:v,name:n.value,page:location.pathname.replace(/^\\/s\\/[^/]+/,'')+location.hash,viewport:innerWidth+'x'+innerHeight})})
-.then(function(x){return x.json().then(function(j){if(!x.ok)throw new Error(j.error||'提交失败');});}).then(function(){t.value='';rx='';r.querySelectorAll('.rx button,[data-q]').forEach(function(x){x.classList.remove('on');if(x.value!==undefined&&x.dataset.q!==undefined)x.value='';});m.style.color='#16a34a';m.textContent='已收到，谢谢！';setTimeout(function(){p.classList.remove('o');m.textContent='';},1500);})
+fetch('/s/${token}/__sd/feedback',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({reaction:rx,answers:ans,text:v,name:n.value,contact:rx==='up'?r.querySelector('.cv').value.trim():'',page:location.pathname.replace(/^\\/s\\/[^/]+/,'')+location.hash,viewport:innerWidth+'x'+innerHeight})})
+.then(function(x){return x.json().then(function(j){if(!x.ok)throw new Error(j.error||'提交失败');});}).then(function(){t.value='';rx='';r.querySelectorAll('.rx button,[data-q]').forEach(function(x){x.classList.remove('on');if(x.value!==undefined&&x.dataset.q!==undefined)x.value='';});r.querySelector('.cv').value='';r.querySelector('.ct').hidden=true;m.style.color='#16a34a';m.textContent='已收到，谢谢！';setTimeout(function(){p.classList.remove('o');m.textContent='';},1500);})
 .catch(function(e){m.style.color='#dc2626';m.textContent=e.message;}).finally(function(){s.disabled=false;});};
 (document.body||document.documentElement).appendChild(host);
 var pb=parseFloat(getComputedStyle(document.body).paddingBottom)||0;document.body.style.paddingBottom=(pb+72)+'px';})();`;

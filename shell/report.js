@@ -34,7 +34,7 @@ export function evidence(id) {
   return {
     views, visitors, actors, timed, medianMs: medians.length ? medians.sort((a, b) => a - b)[Math.floor(medians.length / 2)] : null,
     actions: [...actions].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([action, count]) => ({ action, count })),
-    groups, links: shares.length, reactions, answers, feedback: fb.length, texts: fb.filter(f => f.text).map(f => f.text),
+    contacts: fb.filter(f => f.contact).length, groups, links: shares.length, reactions, answers, feedback: fb.length, texts: fb.filter(f => f.text).map(f => f.text),
   };
 }
 
@@ -52,6 +52,7 @@ export async function makeReport(id) {
     `行为：${ev.actors} 位访客真正动手操作过（提交/保存等）${ev.actions.length ? `，最多的操作：${ev.actions.map(a => `${a.action} ×${a.count}`).join('，')}` : ''}${ev.medianMs != null ? `；停留时间中位数约 ${Math.round(ev.medianMs / 1000)} 秒（${ev.timed} 人有记录）` : ''}`,
     ev.groups.length > 1 && `分组（不同分享链接）：\n${ev.groups.map(g => `- ${g.label}：${g.visitors} 人访问、${g.actors} 人动手、👍${g.reactions.up} 🤔${g.reactions.meh} 👎${g.reactions.down}`).join('\n')}`,
     `表态：${Object.entries(ev.reactions).map(([k, v]) => `${REACTIONS[k]} ${v}`).join('，')}`,
+    ev.contacts && `${ev.contacts} 人主动留下联系方式，希望上线后第一时间用上（比表态更强的意愿信号）`,
     ...Object.entries(ev.answers).map(([q, as]) => `问题「${q}」的回答：\n${as.slice(0, 30).map(a => '- ' + a).join('\n')}`),
     ev.texts.length && `其他意见：\n${ev.texts.slice(0, 40).map(t => '- ' + t.replace(/\s+/g, ' ').slice(0, 300)).join('\n')}`,
   ].filter(Boolean).join('\n\n');

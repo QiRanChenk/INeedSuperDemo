@@ -828,7 +828,7 @@ async function openFeedback() {
     const li = document.createElement('li'); li.className = 'st-' + f.status;
     li.innerHTML = `<input type="checkbox" data-id="${esc(f.id)}"><div class="vmain"><div class="fbtext"></div><div class="muted small"></div></div>`;
     li.querySelector('.fbtext').textContent = f.text;
-    li.querySelector('.small').textContent = [ST[f.status], new Date(f.ts).toLocaleString(), f.name, f.page && f.page !== '/' ? '页面 ' + f.page : '', f.viewport && parseInt(f.viewport) < 600 ? '📱 手机' : '', f.share?.label ? '来自链接「' + f.share.label + '」' : ''].filter(Boolean).join(' · ');
+    li.querySelector('.small').textContent = [ST[f.status], new Date(f.ts).toLocaleString(), f.name, f.contact ? '📇 想内测：' + f.contact : '', f.page && f.page !== '/' ? '页面 ' + f.page : '', f.viewport && parseInt(f.viewport) < 600 ? '📱 手机' : '', f.share?.label ? '来自链接「' + f.share.label + '」' : ''].filter(Boolean).join(' · ');
     ul.appendChild(li);
   }
   if (!$('#dlgFeedback').open) $('#dlgFeedback').showModal();
@@ -1030,7 +1030,7 @@ let lastReport = null;
 function renderReport(report, ev) {
   const r = ev.reactions;
   const secs = ev.medianMs != null ? Math.round(ev.medianMs / 1000) : null;
-  $('#rpStats').innerHTML = [['访客', ev.visitors], ['动手操作', ev.actors ?? 0, '提交、保存这类真实操作过的访客'], ['停留中位数', secs == null ? '–' : secs >= 60 ? `${Math.floor(secs / 60)}分${secs % 60}秒` : `${secs}秒`], ['👍 有用', r.up], ['🤔 一般', r.meh], ['👎 用不上', r.down]]
+  $('#rpStats').innerHTML = [['访客', ev.visitors], ['动手操作', ev.actors ?? 0, '提交、保存这类真实操作过的访客'], ['留联系方式', ev.contacts ?? 0, '点了「有用」并留下微信/手机号、想上线后第一时间用上的人'], ['停留中位数', secs == null ? '–' : secs >= 60 ? `${Math.floor(secs / 60)}分${secs % 60}秒` : `${secs}秒`], ['👍 有用', r.up], ['🤔 一般', r.meh], ['👎 用不上', r.down]]
     .map(([k, v, t]) => `<div${t ? ` title="${t}"` : ''}><span class="muted small">${k}</span><b>${v}</b></div>`).join('');
   const qa = Object.entries(ev.answers || {});
   let html = '';

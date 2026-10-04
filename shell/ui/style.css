@@ -227,7 +227,7 @@ body.view-board #chat, body.view-board #preview { display: none !important; } bo
 .rxbar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--bg); flex: 1; min-width: 60px; } .rxbar i { display: block; }
 /* report dialog */
 .rp-hyp { font-size: 15px; padding: 10px 12px; border-left: 3px solid var(--brand); background: var(--bg); border-radius: 0 8px 8px 0; }
-.rp-stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; } .rp-stats div { background: var(--bg); border-radius: 10px; padding: 10px 12px; } .rp-stats b { display: block; font-size: 20px; }
+.rp-stats { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; } .rp-stats div { background: var(--bg); border-radius: 10px; padding: 10px 12px; } .rp-stats b { display: block; font-size: 20px; }
 .rp-verdict { border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
 .rp-verdict h4 { margin: 0; display: flex; gap: 8px; align-items: center; font-size: 16px; } .rp-verdict ul { margin: 0; padding-left: 18px; } .rp-verdict .lbl { font-size: 12px; color: var(--muted); }
 .rp-qa { font-size: 13px; } .rp-qa li { color: var(--muted); }
@@ -235,7 +235,7 @@ body.view-board #chat, body.view-board #preview { display: none !important; } bo
   body.m-projects #sidebar { display: none !important; } body.m-projects #board { display: flex !important; position: fixed; inset: 0 0 calc(56px + env(safe-area-inset-bottom)) 0; }
   body.view-board.m-chat #chat, body.view-board.m-preview #preview { display: flex !important; }
   .board-cols { grid-template-columns: 1fr; padding: 0 12px 16px; } .board-head { padding: 14px 12px; flex-wrap: wrap; }
-  .rp-stats { grid-template-columns: repeat(3, 1fr); }
+  .rp-stats { grid-template-columns: repeat(4, 1fr); }
 }
 .icard .shot:empty { } .icard .shot.none { height: 44px; font-size: 16px; }
 .verdict { white-space: nowrap; flex: none; }
