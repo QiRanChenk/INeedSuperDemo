@@ -286,10 +286,11 @@
   <div class="dlg wide">
     <div class="row between"><h3>验证 · <span id="rpName"></span></h3><button id="rpClose" class="ghost">关闭</button></div>
     <div id="rpHyp" class="rp-hyp"></div>
+    <div id="rpRound" class="rp-round" hidden></div>
     <div id="rpStats" class="rp-stats"></div>
     <div id="rpBody"></div>
     <div id="rpPre" class="rp-pre"></div>
-    <div class="row end"><span id="rpInfo" class="small muted" style="flex:1"></span><button id="rpIterate" class="ghost" hidden title="把结论里的顾虑和下一步交给 AI，改出第二版再验证">按结论改一版</button><button id="rpPretest" class="ghost" title="AI 先自动走一遍核心流程（可能在 Demo 里留下几条测试数据），再扮演 4 位目标用户试用，找出看不懂、不可信的地方（不算真实证据）">AI 模拟试用</button><button id="rpShare" class="ghost">分享给目标用户</button><button id="rpGen" class="primary">生成 / 更新结论</button></div>
+    <div class="row end"><span id="rpInfo" class="small muted" style="flex:1"></span><button id="rpIterate" class="ghost" hidden title="把结论里的顾虑和下一步交给 AI 改出新一版，并开始新一轮验证（之后的访问和反馈单独统计，报告会和这一轮对比）">按结论改一版</button><button id="rpPretest" class="ghost" title="AI 先自动走一遍核心流程（可能在 Demo 里留下几条测试数据），再扮演 4 位目标用户试用，找出看不懂、不可信的地方（不算真实证据）">AI 模拟试用</button><button id="rpShare" class="ghost">分享给目标用户</button><button id="rpGen" class="primary">生成 / 更新结论</button></div>
   </div>
 </dialog>
 

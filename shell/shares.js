@@ -88,13 +88,25 @@ export function setShareOptions(projectId, token, { feedback }) {
 
 const dayKey = t => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 /** Visits of one link: totals, unique visitors, last `days` days, top pages. */
-export function shareStats(token, days = 14) {
-  let rows = [];
-  try { rows = fs.readFileSync(VIEWS, 'utf8').split('\n').filter(l => l.includes(token)).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(r => r && r.k === token); } catch {}
+// the log is read for every board refresh: parse once per change of the file
+let cache = { key: '', rows: [] };
+function allRows() {
+  let st; try { st = fs.statSync(VIEWS); } catch { return []; }
+  const key = st.mtimeMs + ':' + st.size;
+  if (cache.key !== key) {
+    const rows = fs.readFileSync(VIEWS, 'utf8').split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    cache = { key, rows };
+  }
+  return cache.rows;
+}
+
+/** since: only events at or after this time (validation rounds count separately). */
+export function shareStats(token, days = 14, since = 0) {
+  const rows = allRows().filter(r => r.k === token && r.t >= since);
   const byDay = new Map(), pages = new Map(), visitors = new Set();
-  const actors = new Set(), actions = new Map(), dwell = new Map();
+  const actors = new Set(), actions = new Map(), dwell = new Map(), inputs = [];
   for (const r of rows) {
-    if (r.e === 'a') { actors.add(r.v); const k = String(r.a || '').replace(/\/\d+(?=\/|$)/g, '/:id'); actions.set(k, (actions.get(k) || 0) + 1); continue; }
+    if (r.e === 'a') { actors.add(r.v); if (r.b) inputs.push(r.b); const k = String(r.a || '').replace(/\/\d+(?=\/|$)/g, '/:id'); actions.set(k, (actions.get(k) || 0) + 1); continue; }
     if (r.e === 'd') { dwell.set(r.v, (dwell.get(r.v) || 0) + Math.min(Number(r.ms) || 0, 1_800_000)); continue; }
     visitors.add(r.v);
     const k = dayKey(r.t), d = byDay.get(k) || { views: 0, visitors: new Set() };
@@ -106,7 +118,7 @@ export function shareStats(token, days = 14) {
   const times = [...dwell.values()].sort((a, b) => a - b);
   const views = rows.filter(r => !r.e);
   return {
-    actors: actors.size, actions: [...actions].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([action, count]) => ({ action, count })),
+    actors: actors.size, inputs: inputs.slice(-20), actions: [...actions].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([action, count]) => ({ action, count })),
     medianMs: times.length ? times[Math.floor(times.length / 2)] : null, timed: times.length,
     views: views.length, visitors: visitors.size, last: views.at(-1)?.t || null, days: series,
     pages: [...pages].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([page, views]) => ({ page, views })),

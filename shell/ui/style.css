@@ -260,3 +260,4 @@ body.view-board #chat, body.view-board #preview { display: none !important; } bo
 #soFrame { flex: 1; border: 0; width: 100%; }
 .rp-groups table { width: 100%; border-collapse: collapse; font-size: 13px; } .rp-groups th, .rp-groups td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); } .rp-groups th { color: var(--muted); font-weight: 500; }
 .rp-groups .lbl { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.rp-round { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 10px; background: rgba(91,141,239,.08); border: 1px solid rgba(91,141,239,.25); }

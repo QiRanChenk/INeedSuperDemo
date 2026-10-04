@@ -41,7 +41,12 @@ export function shareMiddleware(req, res) {
   if (m[2].startsWith('/__sd/ping')) return handlePing(req, res, share, visitorId);
   // a visitor who sends a write request has actually used the demo (submitted, saved, booked …)
   // (only successful ones: a rejected form is not a completed action)
-  if (visitorId && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) res.on('finish', () => { if (res.statusCode < 400) recordEvent(share.token, visitorId, 'a', { a: `${req.method} ${m[2].split('?')[0].slice(0, 100)}` }); });
+  if (visitorId && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+    // what they typed is evidence too (real business data vs "test 123"); first 2 KB, read alongside the proxying
+    let raw = '';
+    req.on('data', c => { if (raw.length < 2048) raw += c.toString('utf8', 0, 2048 - raw.length); });
+    res.on('finish', () => { if (res.statusCode < 400) recordEvent(share.token, visitorId, 'a', { a: `${req.method} ${m[2].split('?')[0].slice(0, 100)}`, b: inputSnippet(raw) }); });
+  }
   const st = status(project.id).status;
   if (st !== 'running') {
     if (st !== 'starting') start(project.id).catch(() => {});
@@ -72,6 +77,20 @@ function visitorInjection(share, token) {
   };
 }
 const appendScript = (html, js) => { const i = html.search(/<\/body>/i), tag = `<script>${js}</script>`; return i >= 0 ? html.slice(0, i) + tag + html.slice(i) : html + tag; };
+
+/** Readable gist of a visitor's form submission: "名称=青菜 进价=1.2"; long digit runs (phone numbers) masked. */
+export function inputSnippet(raw) {
+  let j; try { j = JSON.parse(raw); } catch { try { j = Object.fromEntries(new URLSearchParams(raw)); } catch { return ''; } }
+  const parts = [];
+  const walk = (v, k) => {
+    if (parts.length >= 12) return;
+    if (v && typeof v === 'object') { for (const [kk, vv] of Object.entries(v).slice(0, 12)) walk(vv, kk); return; }
+    const t = String(v ?? '').trim();
+    if (t && !/^data:/.test(t) && t.length < 300) parts.push(`${k}=${t.slice(0, 60)}`);
+  };
+  walk(j, '');
+  return parts.join(' ').replace(/\d{7,}/g, d => d.slice(0, 3) + '****' + d.slice(-2)).slice(0, 300);
+}
 
 // time on page: POST /s/<token>/__sd/ping { ms, page } (sendBeacon when the page is hidden); visitors with a cookie only
 function handlePing(req, res, share, visitor) {

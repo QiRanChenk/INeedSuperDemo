@@ -6,7 +6,7 @@ import { PROJECT_TYPES, SKELETONS, skeletonAvailable, listProjects, createProjec
 import { listFeedback, countNew, updateFeedback, deleteFeedback, feedbackToMessage } from './feedback.js';
 import { demoDataInfo, saveDemoData, restoreDemoData, setDailyReset, runDailyResets } from './demodata.js';
 import { getTour, saveTour, generateTour } from './tour.js';
-import { getReport, makeReport, evidence, VERDICTS } from './report.js';
+import { getReport, makeReport, evidence, VERDICTS, currentRound, previousRound, startRound } from './report.js';
 import { makeSketch, cleanSketch } from './sketch.js';
 import { getPretest, runPretest, planWalks, continueWalk, pageList } from './personas.js';
 import { makePlan, normalizePlan, planToMessage } from './planner.js';
@@ -195,19 +195,22 @@ app.post('/api/projects/:id/feedback/message', wrap((req, res) => {
 
 // ---- idea validation: stage + signals for the idea board, and the AI verdict report ----
 function validationOf(p) {
-  const fb = listFeedback(p.id), reactions = { up: 0, meh: 0, down: 0 };
+  const since = currentRound(p.id).start || 0, fb = listFeedback(p.id).filter(f => f.ts >= since), reactions = { up: 0, meh: 0, down: 0 };
   for (const f of fb) if (f.reaction) reactions[f.reaction]++;
   const report = getReport(p.id), shares = listShares(p.id).filter(s => s.active).length, chatted = !!lastChatAt(p.id);
   const stage = isBusy(p.id) || !chatted ? 'building' : report ? 'concluded' : shares ? 'validating' : 'ready';
   let thumb = null;
   try { thumb = fs.readdirSync(path.join(ROOT, 'projects', p.id, '.superdemo', 'shots')).filter(f => f.endsWith('.jpg') && !f.endsWith('-m.jpg')).sort().pop() || null; } catch {} // desktop shots only
   const sketchPending = !p.built && fs.existsSync(path.join(projectDir(p.id), 'sketch.html'));
+  let actors = 0; for (const s of listShares(p.id)) actors += shareStats(s.token, 14, since).actors;
   const pt = getPretest(p.id), pretest = pt ? { up: 0, meh: 0, down: 0 } : null;
   for (const x of pt?.personas || []) pretest[x.reaction]++;
-  return { stage, hypothesis: p.plan?.hypothesis || '', reactions, pretest, sketchPending, feedback: fb.length, shares, verdict: report?.verdict || null, verdictLabel: report ? VERDICTS[report.verdict] : null, thumb };
+  return { stage, hypothesis: p.plan?.hypothesis || '', reactions, actors, pretest, sketchPending, feedback: fb.length, shares, verdict: report?.verdict || null, verdictLabel: report ? VERDICTS[report.verdict] : null, thumb };
 }
-app.get('/api/projects/:id/report', wrap((req, res) => res.json({ report: getReport(req.params.id), evidence: evidence(req.params.id) })));
-app.post('/api/projects/:id/report', wrap(async (req, res) => res.json({ report: await makeReport(req.params.id), evidence: evidence(req.params.id) })));
+const roundInfo = id => { const c = currentRound(id), p = previousRound(id); return { round: c.n, since: c.start, previous: p ? { n: p.n, stats: p.stats, verdict: p.report?.verdict || null, summary: p.report?.summary || '' } : null }; };
+app.get('/api/projects/:id/report', wrap((req, res) => res.json({ report: getReport(req.params.id), evidence: evidence(req.params.id), ...roundInfo(req.params.id) })));
+app.post('/api/projects/:id/report', wrap(async (req, res) => res.json({ report: await makeReport(req.params.id), evidence: evidence(req.params.id), ...roundInfo(req.params.id) })));
+app.post('/api/projects/:id/rounds', wrap((req, res) => { startRound(req.params.id, req.body?.reason); res.json(roundInfo(req.params.id)); }));
 // AI pre-test: the browser captures page snapshots (GET gives the page list), the server runs simulated target users on them
 app.get('/api/projects/:id/pretest', wrap((req, res) => res.json({ pretest: getPretest(req.params.id), pages: pageList(req.params.id) })));
 app.post('/api/projects/:id/pretest/continue', wrap(async (req, res) => res.json({ actions: await continueWalk(req.params.id, req.body || {}) })));

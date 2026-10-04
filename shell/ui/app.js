@@ -999,7 +999,7 @@ function renderBoard() {
       const card = document.createElement('div'); card.className = 'icard';
       card.innerHTML = `<div class="shot${v.thumb ? '' : ' none'}">${v.thumb ? '' : '◇'}</div><div class="body"><div class="name"><span class="dot ${p.status}"></span><span></span>${isBusy(p) ? '<span class="thinking small">⋯</span>' : ''}</div>
         <div class="hyp"></div><div class="sig">${total ? `<span class="rxbar" title="👍 ${r.up} · 🤔 ${r.meh} · 👎 ${r.down}"><i style="width:${r.up / total * 100}%;background:#3fb950"></i><i style="width:${r.meh / total * 100}%;background:#d29922"></i><i style="width:${r.down / total * 100}%;background:#e5534b"></i></span>` : ''}
-        ${total ? `<span>👍${r.up} 🤔${r.meh} 👎${r.down}</span>` : ''}${!total && v.pretest ? `<span class="muted" title="AI 模拟试用（不算真实证据）">模拟 👍${v.pretest.up} 🤔${v.pretest.meh} 👎${v.pretest.down}</span>` : ''}${v.feedback ? `<span>💬 ${v.feedback}</span>` : ''}${v.verdict ? `<span class="verdict ${v.verdict}">${esc(v.verdictLabel)}</span>` : ''}</div></div>`;
+        ${total ? `<span>👍${r.up} 🤔${r.meh} 👎${r.down}</span>` : ''}${!total && v.pretest ? `<span class="muted" title="AI 模拟试用（不算真实证据）">模拟 👍${v.pretest.up} 🤔${v.pretest.meh} 👎${v.pretest.down}</span>` : ''}${v.actors ? `<span title="动手操作过的访客">🛠 ${v.actors}</span>` : ''}${v.feedback ? `<span>💬 ${v.feedback}</span>` : ''}${v.verdict ? `<span class="verdict ${v.verdict}">${esc(v.verdictLabel)}</span>` : ''}</div></div>`;
       if (v.thumb) card.querySelector('.shot').style.backgroundImage = `url("/api/projects/${p.id}/shots/${v.thumb}")`;
       card.querySelector('.name span:nth-child(2)').textContent = p.name;
       card.querySelector('.hyp').textContent = v.hypothesis || p.description || '';
@@ -1020,17 +1020,26 @@ async function openReport() {
   const id = current.id;
   $('#rpName').textContent = current.name;
   $('#rpHyp').textContent = current.validation?.hypothesis ? '要验证：' + current.validation.hypothesis : '要验证：' + (current.description || '');
-  const { report, evidence: ev } = await api(`/api/projects/${id}/report`);
+  const { report, evidence: ev, round, previous } = await api(`/api/projects/${id}/report`);
   if (current?.id !== id) return;
+  renderRound(round, previous);
   renderReport(report, ev);
   api(`/api/projects/${id}/pretest`).then(({ pretest }) => { if (current?.id === id) renderPretest(pretest); }).catch(() => {});
   if (!$('#dlgReport').open) $('#dlgReport').showModal();
 }
 let lastReport = null;
+function renderRound(round, prev) {
+  const box = $('#rpRound');
+  if (!prev) { box.hidden = true; return; }
+  const p = prev.stats || {}, r = p.reactions || {};
+  box.hidden = false;
+  box.innerHTML = `<b>第 ${round} 轮验证</b><span class="muted small">只统计改版之后的访问和反馈</span>
+    <div class="small">上一轮${prev.verdict ? ` <span class="verdict ${prev.verdict}">${VERDICT_NAMES[prev.verdict]}</span>` : ''}：访客 ${p.visitors ?? 0} · 动手 ${p.actors ?? 0} · 留联系方式 ${p.contacts ?? 0} · 👍${r.up ?? 0} 🤔${r.meh ?? 0} 👎${r.down ?? 0}${prev.summary ? ` — ${esc(prev.summary)}` : ''}</div>`;
+}
 function renderReport(report, ev) {
   const r = ev.reactions;
   const secs = ev.medianMs != null ? Math.round(ev.medianMs / 1000) : null;
-  $('#rpStats').innerHTML = [['访客', ev.visitors], ['动手操作', ev.actors ?? 0, '提交、保存这类真实操作过的访客'], ['留联系方式', ev.contacts ?? 0, '点了「有用」并留下微信/手机号、想上线后第一时间用上的人'], ['停留中位数', secs == null ? '–' : secs >= 60 ? `${Math.floor(secs / 60)}分${secs % 60}秒` : `${secs}秒`], ['👍 有用', r.up], ['🤔 一般', r.meh], ['👎 用不上', r.down]]
+  $('#rpStats').innerHTML = [['访客', ev.visitors], ['动手操作', ev.actors ?? 0, '提交、保存这类真实操作过的访客'], ['留联系方式', ev.contacts ?? 0, '点了「有用」并留下微信/手机号、想上线后第一时间用上的人'], ['停留中位数', secs == null ? '–' : secs >= 100 ? `${Math.round(secs / 6) / 10}分` : `${secs}秒`], ['👍 有用', r.up], ['🤔 一般', r.meh], ['👎 用不上', r.down]]
     .map(([k, v, t]) => `<div${t ? ` title="${t}"` : ''}><span class="muted small">${k}</span><b>${v}</b></div>`).join('');
   const qa = Object.entries(ev.answers || {});
   let html = '';
@@ -1048,12 +1057,17 @@ function renderReport(report, ev) {
   // how far the evidence is from a stable conclusion (≥ 5 people who reacted)
   const reacted = r.up + r.meh + r.down;
   if (ev.feedback && reacted < 5) $('#rpInfo').textContent = `已有 ${reacted} 人表态，再收集 ${5 - reacted} 人，结论会更可信`;
+  // the verdict is a snapshot: say so when evidence kept coming in afterwards
+  const newFb = report ? ev.feedback - (report.stats.feedback || 0) : 0, newVis = report ? ev.visitors - (report.stats.visitors || 0) : 0;
+  if (newFb > 0 || newVis > 0) $('#rpInfo').textContent = `⚠ 结论生成后又来了 ${[newVis > 0 && `${newVis} 位访客`, newFb > 0 && `${newFb} 条反馈`].filter(Boolean).join('、')}，点「生成 / 更新结论」更新`;
   lastReport = report; $('#rpIterate').hidden = !report || !(report.next.length || report.concerns.length);
 }
 $('#btnReport').onclick = openReport;
 $('#rpClose').onclick = () => $('#dlgReport').close();
-$('#rpIterate').onclick = () => {
+$('#rpIterate').onclick = async () => {
   const r = lastReport; if (!r) return;
+  // a new validation round starts now: later visits and feedback are judged against this one
+  try { await api(`/api/projects/${current.id}/rounds`, { method: 'POST', body: { reason: r.next.join('；').slice(0, 300) } }); } catch {}
   const msg = `根据试用验证的结论改出第二版 Demo，用来做下一轮验证。\n结论：${VERDICT_NAMES[r.verdict]}——${r.summary}\n${r.concerns.length ? `试用者的顾虑：\n${r.concerns.map(x => '- ' + x).join('\n')}\n` : ''}建议的下一步：\n${r.next.map(x => '- ' + x).join('\n')}\n请只做能在 Demo 里体现、帮助下一轮验证的改动（不能在 Demo 里验证的，如线下调研，写进总结里提醒我）；保持验证版的轻量，改完在电脑和手机上各看一次。`;
   $('#dlgReport').close();
   isBusy(current) ? enqueue(msg) : send(msg, { budget: FIRST_BUILD_BUDGET });
@@ -1061,7 +1075,7 @@ $('#rpIterate').onclick = () => {
 $('#rpShare').onclick = () => { $('#dlgReport').close(); openShare(); };
 $('#rpGen').onclick = async () => {
   const b = $('#rpGen'); b.disabled = true; $('#rpInfo').textContent = 'AI 正在根据证据写结论…';
-  try { const { report, evidence: ev } = await api(`/api/projects/${current.id}/report`, { method: 'POST' }); renderReport(report, ev); loadProjects(); }
+  try { const { report, evidence: ev, round, previous } = await api(`/api/projects/${current.id}/report`, { method: 'POST' }); renderRound(round, previous); renderReport(report, ev); loadProjects(); }
   catch (e) { $('#rpInfo').textContent = '✗ ' + e.message; b.disabled = false; }
 };
 

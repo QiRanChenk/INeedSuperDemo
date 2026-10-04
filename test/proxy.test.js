@@ -22,3 +22,10 @@ test('tour: steps keep relative pages only; visitor script escapes text and pars
   assert.doesNotThrow(() => new Function(js));
   assert.ok(!js.includes('<img'));
 });
+
+test('inputSnippet summarises a visitor submission and masks phone numbers', async () => {
+  const { inputSnippet } = await import('../shell/proxy.js');
+  assert.equal(inputSnippet('{"name":"青菜","price":1.2,"phone":"13812345678","pic":"data:image/png;base64,xx"}'), 'name=青菜 price=1.2 phone=138****78');
+  assert.equal(inputSnippet('a=1&b=%E4%BD%A0'), 'a=1 b=你');
+  assert.equal(inputSnippet(''), '');
+});
