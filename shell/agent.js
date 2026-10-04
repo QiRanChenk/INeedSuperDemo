@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { chat, StoppedError } from './llm.js';
-import { getSettings, saveSettings, visionEnabled, childEnv, SDK_DIR } from './config.js';
+import { getSettings, saveSettings, visionEnabled, childEnv, SDK_DIR, TEMPLATES_DIR } from './config.js';
 import { readProject, projectDir, safePath, fileTree, PROJECT_TYPES } from './registry.js';
 import { restart, logs, status, waitForPort } from './runner.js';
 import { loadHistory, appendHistory, resolveSession } from './sessions.js';
@@ -403,6 +403,17 @@ function qualityGap(project, ctx) {
   return out;
 }
 
+/** Skeleton pages still byte-identical to the template (e.g. a leftover "报名审核台" in an equipment-inspection demo). */
+export function leftoverPages(project) {
+  if (!project.skeleton || !project.template) return [];
+  const pub = path.join(projectDir(project.id), 'public'), tpl = path.join(TEMPLATES_DIR, project.template, 'public');
+  try {
+    return fs.readdirSync(pub).filter(f => f.endsWith('.html')).filter(f => {
+      try { return fs.readFileSync(path.join(pub, f), 'utf8') === fs.readFileSync(path.join(tpl, f), 'utf8'); } catch { return false; }
+    });
+  } catch { return []; }
+}
+
 // The SDK docs are in the system prompt; reading sdk/ sources costs many iterations and is almost never needed.
 const isSdkPath = p => /^(\.\/)?sdk(\/|$)/.test(String(p || '').trim());
 const SDK_SOURCE_NOTE = 'SDK 的用法已完整写在系统提示的「SDK 文档」里，请直接按文档使用，不要读 sdk/ 源码。若确实怀疑 SDK 本身有问题，再带上 force: true 重新调用。';
@@ -667,11 +678,16 @@ async function runAgentInner(project, userMessage, run, sid, opts = {}) {
       if (drain()) { if (message.content) onEvent({ type: 'text', content: message.content }); rebuild(); continue; }
       // quality gate (once per turn): code changed for a UI project but the result was not looked at since
       const missing = qualityGap(project, ctx);
-      if (missing.length && i < settings.maxIterations - 2) {
+      const leftover = !ctx.gateDone && ctx.lastChangeAt ? leftoverPages(project) : [];
+      if ((missing.length || leftover.length) && i < settings.maxIterations - 2) {
         ctx.gateDone = true;
         if (message.content) onEvent({ type: 'text', content: message.content });
-        push({ role: 'user', system: true, ts: Date.now(), content: `[系统] 收尾前请先检查实际效果：你改动后还没有在${missing.join('和')}尺寸下查看过页面。请用 page_view${missing.includes('手机') ? '（手机用 device="mobile"）' : ''}查看，发现布局问题或报错就修复；确认无误后再向用户总结。` });
-        onEvent({ type: 'gate', missing });
+        const notes = [
+          leftover.length && `这些页面还是起步骨架的原样，没有按方案改过：${leftover.join('、')}。方案用不上的直接 delete_file 删掉，并去掉其他页面导航里指向它们的链接；用得上的改成方案里的内容。`,
+          missing.length && `你改动后还没有在${missing.join('和')}尺寸下查看过页面。请用 page_view${missing.includes('手机') ? '（手机用 device="mobile"）' : ''}查看，发现布局问题或报错就修复。`,
+        ].filter(Boolean);
+        push({ role: 'user', system: true, ts: Date.now(), content: `[系统] 收尾前请先处理：\n${notes.map((x, k) => `${k + 1}. ${x}`).join('\n')}\n处理完再向用户总结。` });
+        onEvent({ type: 'gate', missing, leftover });
         rebuild(); continue;
       }
       finalText = message.content || ''; break;
@@ -706,7 +722,20 @@ async function runAgentInner(project, userMessage, run, sid, opts = {}) {
     rebuild();
   }
 
-  if (!finalText) { finalText = '（已达到最大迭代次数，停止。你可以继续对话让我接着做。）'; push({ role: 'assistant', content: finalText, ts: Date.now() }); }
+  if (!finalText) {
+    // out of steps while still calling tools: one last call without tools, so the user gets an honest state report
+    try {
+      push({ role: 'user', system: true, ts: Date.now(), content: '[系统] 本轮步数已用完，不能再调用工具。请直接向用户简短总结：已完成的改动、没做完的部分（具体到页面/文件，以及是否会影响现在的使用，例如导航指向了还没写完的页面）、建议下一句怎么说让你接着做。' });
+      rebuild();
+      onEvent({ type: 'thinking', iteration: settings.maxIterations + 1 });
+      const r = await chat({ messages: withImages(id, messages, false), settings, signal, onDelta: d => onEvent({ type: 'delta', ...d }) });
+      const u = normalizeUsage(r.usage, r.ms, r.ttft);
+      if (u) recordProjectUsage(id, u, sid);
+      finalText = String(r.message.content || '').trim();
+    } catch (e) { if (signal.aborted) return stopped(); console.warn(`[agent] ${id}: final summary failed: ${e.message}`); }
+    finalText = finalText ? `${finalText}\n\n（本轮步数已用完，回复「继续」可以接着做。）` : '（已达到最大迭代次数，停止。你可以继续对话让我接着做。）';
+    push({ role: 'assistant', content: finalText, ts: Date.now() });
+  }
   onEvent({ type: 'done', session: sid, content: finalText });
   return finalText;
 }

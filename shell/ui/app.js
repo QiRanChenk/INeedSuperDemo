@@ -392,10 +392,10 @@ function handleEvent(pid, ev) {
     case 'snapshot': addUndo(pid, ev); break;
     case 'browser': { const projectId = String(pid).split(':')[0]; PageBot.handle(projectId, ev, current?.id === projectId && current.hasUi ? $('#frame') : null).finally(() => pageBotBusy.delete(ev.reqId)); pageBotBusy.add(ev.reqId); break; }
     case 'shot': addShot(pid, ev.file, '页面截图（' + ev.info + '）'); break;
-    case 'gate': addSys(pid, `🔍 收尾前自检：让 AI 在${ev.missing.join('和')}尺寸下检查页面`); break;
+    case 'gate': addSys(pid, `🔍 收尾前自检：${[ev.leftover?.length && `清理没改过的骨架页（${ev.leftover.join('、')}）`, ev.missing?.length && `在${ev.missing.join('和')}尺寸下检查页面`].filter(Boolean).join('；')}`); break;
     case 'vision_off': addSys(pid, '当前模型不接受图片，已改为只发送页面结构文本（可在模型设置中调整）'); break;
     case 'web_errors': addSys(pid, `⚠ 预览页面报告了 ${ev.count} 个前端错误，已交给 AI 处理`); break;
-    case 'done': finishText(pid, ev.content); if (ev.stopped) addSys(pid, '■ 已停止'); if (sameProject(pid)) reloadFrame(); break;
+    case 'done': finishText(pid, ev.content); if (ev.stopped) addSys(pid, '■ 已停止'); if (sameProject(pid)) reloadFrame(); if (!ev.stopped) nudgePretest(pid); break;
     case 'error': addMsg(pid, 'error', ev.message); break;
   }
 }
@@ -892,7 +892,7 @@ function renderBoard() {
       const card = document.createElement('div'); card.className = 'icard';
       card.innerHTML = `<div class="shot${v.thumb ? '' : ' none'}">${v.thumb ? '' : '◇'}</div><div class="body"><div class="name"><span class="dot ${p.status}"></span><span></span>${isBusy(p) ? '<span class="thinking small">⋯</span>' : ''}</div>
         <div class="hyp"></div><div class="sig">${total ? `<span class="rxbar" title="👍 ${r.up} · 🤔 ${r.meh} · 👎 ${r.down}"><i style="width:${r.up / total * 100}%;background:#3fb950"></i><i style="width:${r.meh / total * 100}%;background:#d29922"></i><i style="width:${r.down / total * 100}%;background:#e5534b"></i></span>` : ''}
-        ${total ? `<span>👍${r.up} 🤔${r.meh} 👎${r.down}</span>` : ''}${v.feedback ? `<span>💬 ${v.feedback}</span>` : ''}${v.verdict ? `<span class="verdict ${v.verdict}">${esc(v.verdictLabel)}</span>` : ''}</div></div>`;
+        ${total ? `<span>👍${r.up} 🤔${r.meh} 👎${r.down}</span>` : ''}${!total && v.pretest ? `<span class="muted" title="AI 模拟试用（不算真实证据）">模拟 👍${v.pretest.up} 🤔${v.pretest.meh} 👎${v.pretest.down}</span>` : ''}${v.feedback ? `<span>💬 ${v.feedback}</span>` : ''}${v.verdict ? `<span class="verdict ${v.verdict}">${esc(v.verdictLabel)}</span>` : ''}</div></div>`;
       if (v.thumb) card.querySelector('.shot').style.backgroundImage = `url("/api/projects/${p.id}/shots/${v.thumb}")`;
       card.querySelector('.name span:nth-child(2)').textContent = p.name;
       card.querySelector('.hyp').textContent = v.hypothesis || p.description || '';
@@ -952,6 +952,17 @@ $('#rpGen').onclick = async () => {
   catch (e) { $('#rpInfo').textContent = '✗ ' + e.message; b.disabled = false; }
 };
 
+/** After a build turn of an idea that hasn't been tried by anyone yet (no pre-test, no share): suggest the next step. */
+function nudgePretest(pid) {
+  const p = projects.find(x => x.id === pid), v = p?.validation;
+  if (!p?.plan || !v || v.pretest || v.shares || v.feedback) return;
+  const d = addSys(pid, '下一步：发给真人之前，可以先让 4 位模拟用户试一遍，挑出看不懂、不可信的地方（约 1 分钟）。');
+  const b = document.createElement('button'); b.className = 'ghost small'; b.textContent = '🧪 AI 模拟试用';
+  b.style.marginLeft = '8px';
+  b.onclick = async () => { b.remove(); if (current?.id !== pid) return; await openReport(); $('#rpPretest').click(); };
+  d.appendChild(b);
+}
+
 // AI pre-test: simulated target users try the demo before real people do (shown apart from the real evidence)
 const REACT_ICON = { up: '👍', meh: '🤔', down: '👎' };
 let lastPretest = null;
@@ -960,6 +971,7 @@ function renderPretest(t) {
   if (!t) { $('#rpPre').innerHTML = ''; return; }
   const li = a => a.map(x => `<li>${esc(x)}</li>`).join('');
   $('#rpPre').innerHTML = `<div class="row between"><b>AI 模拟试用</b><span class="muted small">模拟，不算真实证据 · ${new Date(t.ts).toLocaleString()}</span></div>
+    ${t.walked?.length ? `<div class="muted small">先自动走了一遍：${t.walked.map(w => `${w.ok ? '✓' : '⚠'} ${esc(w.goal)}`).join('　')}</div>` : ''}
     <div class="pre-grid">${t.personas.map(p => `<div class="pre-p"><div class="pre-h"><span>${REACT_ICON[p.reaction]}</span><b>${esc(p.name)}</b></div>
       <div class="muted small">${esc(p.attitude)}</div><div>${esc(p.firstLook)}</div>
       ${p.answers.length ? `<ul class="small">${p.answers.map(a => `<li title="${esc(a.q)}">${esc(a.a)}</li>`).join('')}</ul>` : ''}
@@ -968,9 +980,9 @@ function renderPretest(t) {
     ${t.fixes.length ? `<div class="lbl">分享前建议先改</div><ul>${li(t.fixes)}</ul><div class="row end"><button id="rpPreFix" class="ghost">让 AI 先改这些</button></div>` : ''}`;
   const fix = $('#rpPreFix');
   if (fix) fix.onclick = () => {
-    const msg = `分享给真人试用前，先按 AI 模拟试用发现的问题改一下 Demo（模拟用户的意见只作参考，你判断不合理的可以不改，说明原因）。\n${t.confusions.length ? `容易看不懂的地方：\n${t.confusions.map(x => '- ' + x).join('\n')}\n` : ''}建议先改：\n${t.fixes.map(x => '- ' + x).join('\n')}\n保持验证版的轻量，只改这些；改完在电脑和手机上各看一次。`;
+    const msg = `分享给真人试用前，先按 AI 模拟试用发现的问题改一下 Demo（模拟用户的意见只作参考，你判断不合理的可以不改，说明原因）。\n${t.confusions.length ? `容易看不懂的地方：\n${t.confusions.map(x => '- ' + x).join('\n')}\n` : ''}建议先改：\n${t.fixes.map(x => '- ' + x).join('\n')}\n保持验证版的轻量，只改这些；需要新页面的，只做能演示那一下的最小版本；改完在电脑和手机上各看一次。`;
     $('#dlgReport').close();
-    isBusy(current) ? enqueue(msg) : send(msg, { budget: 30 });
+    isBusy(current) ? enqueue(msg) : send(msg, { budget: FIRST_BUILD_BUDGET });
   };
 }
 $('#rpPretest').onclick = async () => {
@@ -980,8 +992,15 @@ $('#rpPretest').onclick = async () => {
     $('#rpInfo').textContent = '正在打开各页面…';
     const { pages } = await api(`/api/projects/${id}/pretest`);
     const snaps = await PageBot.capture(id, pages);
+    $('#rpInfo').textContent = '规划并走一遍核心流程…';
+    let walks = [];
+    try {
+      const plan = await api(`/api/projects/${id}/pretest/walks`, { method: 'POST', body: { pages: snaps } });
+      walks = await PageBot.walk(id, plan.walks || [], (goal, text) => api(`/api/projects/${id}/pretest/continue`, { method: 'POST', body: { goal, text } }).then(r => r.actions || []));
+    } catch {} // without walkthroughs the pre-test falls back to the agent's own page_act runs
     $('#rpInfo').textContent = `4 位模拟用户正在试用 ${snaps.length} 个页面…`;
-    const { pretest } = await api(`/api/projects/${id}/pretest`, { method: 'POST', body: { pages: snaps } });
+    const { pretest } = await api(`/api/projects/${id}/pretest`, { method: 'POST', body: { pages: snaps, walks } });
+    loadProjects();
     if (current?.id === id) { renderPretest(pretest); $('#rpInfo').textContent = ''; $('#rpPre').scrollIntoView({ behavior: 'smooth', block: 'start' }); }
   } catch (e) { $('#rpInfo').textContent = '✗ ' + e.message; }
   finally { b.disabled = false; }

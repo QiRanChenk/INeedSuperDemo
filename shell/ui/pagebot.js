@@ -345,21 +345,44 @@ const PageBot = (() => {
   }
 
   /** Text snapshots of a few pages in a throwaway desktop frame (for the AI pre-test; doesn't touch the agent's frames). */
-  async function capture(projectId, paths) {
+  async function withTempFrame(fn) {
     const f = document.createElement('iframe');
     f.setAttribute('aria-hidden', 'true'); f.tabIndex = -1;
     f.style.cssText = 'position:fixed;left:-20000px;top:0;width:1280px;height:800px;border:0;visibility:hidden';
     document.body.appendChild(f);
-    const out = [];
-    try {
+    try { return await fn(f); } finally { f.remove(); }
+  }
+  async function capture(projectId, paths) {
+    return withTempFrame(async f => {
+      const out = [];
       for (const p of paths) {
         await navigate(f, projectId, p); await waitIdle(f);
-        if (!onProject(f, projectId)) continue;
-        out.push({ path: '/' + p, text: snapshot(f) });
+        if (onProject(f, projectId)) out.push({ path: '/' + p, text: snapshot(f) });
       }
-    } finally { f.remove(); }
-    return out;
+      return out;
+    });
+  }
+  /** Run planned walkthroughs ([{path, goal, actions}]) and return what happened + the page after each. */
+  // replan(goal, textSoFar) -> remaining actions; called (up to twice) when a step fails (the plan guessed at elements behind a click)
+  async function walk(projectId, walks, replan) {
+    return withTempFrame(async f => {
+      const out = [];
+      const run = async actions => { try { return await act(f, projectId, actions, 'pretest'); } catch (e) { return ['✗ ' + e.message]; } };
+      for (const w of walks) {
+        await navigate(f, projectId, w.path || ''); await waitIdle(f);
+        if (!onProject(f, projectId)) continue;
+        snapshot(f); // fresh refs for this page
+        let log = await run(w.actions);
+        for (let k = 0; replan && k < 2 && log.some(l => l.startsWith('✗')); k++) {
+          const rest = await replan(w.goal, `执行结果：\n${log.join('\n')}\n\n${snapshot(f)}`).catch(() => []);
+          if (!rest.length) break;
+          log = [...log.filter(l => !l.startsWith('✗')), ...await run(rest)];
+        }
+        out.push({ goal: w.goal || '', text: `执行结果：\n${log.join('\n')}\n\n${snapshot(f)}` });
+      }
+      return out;
+    });
   }
 
-  return { handle, capture, snapshot, screenshot, act }; // snapshot / screenshot / act exposed for debugging from the console
+  return { handle, capture, walk, snapshot, screenshot, act }; // snapshot / screenshot / act exposed for debugging from the console
 })();

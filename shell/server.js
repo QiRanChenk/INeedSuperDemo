@@ -7,7 +7,7 @@ import { listFeedback, countNew, updateFeedback, deleteFeedback, feedbackToMessa
 import { demoDataInfo, saveDemoData, restoreDemoData, setDailyReset, runDailyResets } from './demodata.js';
 import { getTour, saveTour, generateTour } from './tour.js';
 import { getReport, makeReport, evidence, VERDICTS } from './report.js';
-import { getPretest, runPretest, pageList } from './personas.js';
+import { getPretest, runPretest, planWalks, continueWalk, pageList } from './personas.js';
 import { makePlan, normalizePlan, planToMessage } from './planner.js';
 import * as runner from './runner.js';
 import { proxyMiddleware, proxyUpgrade, shareMiddleware, upgradeTarget } from './proxy.js';
@@ -186,13 +186,17 @@ function validationOf(p) {
   const stage = isBusy(p.id) || !chatted ? 'building' : report ? 'concluded' : shares ? 'validating' : 'ready';
   let thumb = null;
   try { thumb = fs.readdirSync(path.join(ROOT, 'projects', p.id, '.superdemo', 'shots')).filter(f => f.endsWith('.jpg') && !f.endsWith('-m.jpg')).sort().pop() || null; } catch {} // desktop shots only
-  return { stage, hypothesis: p.plan?.hypothesis || '', reactions, feedback: fb.length, shares, verdict: report?.verdict || null, verdictLabel: report ? VERDICTS[report.verdict] : null, thumb };
+  const pt = getPretest(p.id), pretest = pt ? { up: 0, meh: 0, down: 0 } : null;
+  for (const x of pt?.personas || []) pretest[x.reaction]++;
+  return { stage, hypothesis: p.plan?.hypothesis || '', reactions, pretest, feedback: fb.length, shares, verdict: report?.verdict || null, verdictLabel: report ? VERDICTS[report.verdict] : null, thumb };
 }
 app.get('/api/projects/:id/report', wrap((req, res) => res.json({ report: getReport(req.params.id), evidence: evidence(req.params.id) })));
 app.post('/api/projects/:id/report', wrap(async (req, res) => res.json({ report: await makeReport(req.params.id), evidence: evidence(req.params.id) })));
 // AI pre-test: the browser captures page snapshots (GET gives the page list), the server runs simulated target users on them
 app.get('/api/projects/:id/pretest', wrap((req, res) => res.json({ pretest: getPretest(req.params.id), pages: pageList(req.params.id) })));
-app.post('/api/projects/:id/pretest', wrap(async (req, res) => res.json({ pretest: await runPretest(req.params.id, req.body?.pages) })));
+app.post('/api/projects/:id/pretest/continue', wrap(async (req, res) => res.json({ actions: await continueWalk(req.params.id, req.body || {}) })));
+app.post('/api/projects/:id/pretest/walks', wrap(async (req, res) => res.json({ walks: await planWalks(req.params.id, req.body?.pages) })));
+app.post('/api/projects/:id/pretest', wrap(async (req, res) => res.json({ pretest: await runPretest(req.params.id, req.body?.pages, req.body?.walks) })));
 
 // ---- visitor tour (shown on share links) ----
 app.get('/api/projects/:id/tour', wrap((req, res) => res.json(getTour(req.params.id) || { enabled: false, title: '', intro: '', steps: [] })));
