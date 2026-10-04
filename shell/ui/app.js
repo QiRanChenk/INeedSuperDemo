@@ -992,10 +992,10 @@ $('#rpGen').onclick = async () => {
 };
 
 /** After a build turn of an idea that hasn't been tried by anyone yet (no pre-test, no share): suggest the next step. */
-function nudgePretest(pid) {
-  const p = projects.find(x => x.id === pid), v = p?.validation;
+function nudgePretest(key) { // key = view key "<projectId>:<session>"
+  const pid = String(key).split(':')[0], p = projects.find(x => x.id === pid), v = p?.validation;
   if (!p?.plan || !v || v.pretest || v.shares || v.feedback) return;
-  const d = addSys(pid, '下一步：发给真人之前，可以先让 4 位模拟用户试一遍，挑出看不懂、不可信的地方（约 1 分钟）。');
+  const d = addSys(key, '下一步：发给真人之前，可以先让 4 位模拟用户试一遍，挑出看不懂、不可信的地方（约 1 分钟）。');
   const b = document.createElement('button'); b.className = 'ghost small'; b.textContent = '🧪 AI 模拟试用';
   b.style.marginLeft = '8px';
   b.onclick = async () => { b.remove(); if (current?.id !== pid) return; await openReport(); $('#rpPretest').click(); };
