@@ -916,6 +916,7 @@ async function openReport() {
   const { report, evidence: ev } = await api(`/api/projects/${id}/report`);
   if (current?.id !== id) return;
   renderReport(report, ev);
+  api(`/api/projects/${id}/pretest`).then(({ pretest }) => { if (current?.id === id) renderPretest(pretest); }).catch(() => {});
   if (!$('#dlgReport').open) $('#dlgReport').showModal();
 }
 let lastReport = null;
@@ -931,7 +932,7 @@ function renderReport(report, ev) {
       ${report.evidence.length ? `<div class="lbl">证据</div><ul>${li(report.evidence)}</ul>` : ''}${report.concerns.length ? `<div class="lbl">顾虑</div><ul>${li(report.concerns)}</ul>` : ''}${report.next.length ? `<div class="lbl">下一步</div><ul>${li(report.next)}</ul>` : ''}</div>`;
   }
   if (qa.length) html += `<div class="rp-qa">${qa.map(([q, as]) => `<p><b>${esc(q)}</b></p><ul>${as.slice(0, 8).map(a => `<li>${esc(a)}</li>`).join('')}</ul>`).join('')}</div>`;
-  if (!report && !ev.feedback) html += `<div class="muted small">还没有反馈。点「分享给目标用户」生成链接发出去，试用者在页面右下角就能表态、回答验证问题。</div>`;
+  if (!report && !ev.feedback) html += `<div class="muted small">还没有反馈。点「分享给目标用户」生成链接发出去，试用者在页面右下角就能表态、回答验证问题。发出去之前，可以先点「AI 模拟试用」让模拟用户挑一遍毛病。</div>`;
   $('#rpBody').innerHTML = html;
   $('#rpGen').disabled = !ev.feedback; $('#rpInfo').textContent = '';
   lastReport = report; $('#rpIterate').hidden = !report || !(report.next.length || report.concerns.length);
@@ -949,6 +950,41 @@ $('#rpGen').onclick = async () => {
   const b = $('#rpGen'); b.disabled = true; $('#rpInfo').textContent = 'AI 正在根据证据写结论…';
   try { const { report, evidence: ev } = await api(`/api/projects/${current.id}/report`, { method: 'POST' }); renderReport(report, ev); loadProjects(); }
   catch (e) { $('#rpInfo').textContent = '✗ ' + e.message; b.disabled = false; }
+};
+
+// AI pre-test: simulated target users try the demo before real people do (shown apart from the real evidence)
+const REACT_ICON = { up: '👍', meh: '🤔', down: '👎' };
+let lastPretest = null;
+function renderPretest(t) {
+  lastPretest = t;
+  if (!t) { $('#rpPre').innerHTML = ''; return; }
+  const li = a => a.map(x => `<li>${esc(x)}</li>`).join('');
+  $('#rpPre').innerHTML = `<div class="row between"><b>AI 模拟试用</b><span class="muted small">模拟，不算真实证据 · ${new Date(t.ts).toLocaleString()}</span></div>
+    <div class="pre-grid">${t.personas.map(p => `<div class="pre-p"><div class="pre-h"><span>${REACT_ICON[p.reaction]}</span><b>${esc(p.name)}</b></div>
+      <div class="muted small">${esc(p.attitude)}</div><div>${esc(p.firstLook)}</div>
+      ${p.answers.length ? `<ul class="small">${p.answers.map(a => `<li title="${esc(a.q)}">${esc(a.a)}</li>`).join('')}</ul>` : ''}
+      ${p.quote ? `<div class="pre-q">“${esc(p.quote)}”</div>` : ''}</div>`).join('')}</div>
+    ${t.confusions.length ? `<div class="lbl">容易看不懂</div><ul>${li(t.confusions)}</ul>` : ''}
+    ${t.fixes.length ? `<div class="lbl">分享前建议先改</div><ul>${li(t.fixes)}</ul><div class="row end"><button id="rpPreFix" class="ghost">让 AI 先改这些</button></div>` : ''}`;
+  const fix = $('#rpPreFix');
+  if (fix) fix.onclick = () => {
+    const msg = `分享给真人试用前，先按 AI 模拟试用发现的问题改一下 Demo（模拟用户的意见只作参考，你判断不合理的可以不改，说明原因）。\n${t.confusions.length ? `容易看不懂的地方：\n${t.confusions.map(x => '- ' + x).join('\n')}\n` : ''}建议先改：\n${t.fixes.map(x => '- ' + x).join('\n')}\n保持验证版的轻量，只改这些；改完在电脑和手机上各看一次。`;
+    $('#dlgReport').close();
+    isBusy(current) ? enqueue(msg) : send(msg, { budget: 30 });
+  };
+}
+$('#rpPretest').onclick = async () => {
+  const id = current.id, b = $('#rpPretest'); b.disabled = true;
+  try {
+    if (current.status !== 'running') throw new Error('项目没在运行：先启动再试');
+    $('#rpInfo').textContent = '正在打开各页面…';
+    const { pages } = await api(`/api/projects/${id}/pretest`);
+    const snaps = await PageBot.capture(id, pages);
+    $('#rpInfo').textContent = `4 位模拟用户正在试用 ${snaps.length} 个页面…`;
+    const { pretest } = await api(`/api/projects/${id}/pretest`, { method: 'POST', body: { pages: snaps } });
+    if (current?.id === id) { renderPretest(pretest); $('#rpInfo').textContent = ''; $('#rpPre').scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+  } catch (e) { $('#rpInfo').textContent = '✗ ' + e.message; }
+  finally { b.disabled = false; }
 };
 
 // ---------- phone layout: bottom tabs switch between projects / chat / preview ----------

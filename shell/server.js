@@ -7,6 +7,7 @@ import { listFeedback, countNew, updateFeedback, deleteFeedback, feedbackToMessa
 import { demoDataInfo, saveDemoData, restoreDemoData, setDailyReset, runDailyResets } from './demodata.js';
 import { getTour, saveTour, generateTour } from './tour.js';
 import { getReport, makeReport, evidence, VERDICTS } from './report.js';
+import { getPretest, runPretest, pageList } from './personas.js';
 import { makePlan, normalizePlan, planToMessage } from './planner.js';
 import * as runner from './runner.js';
 import { proxyMiddleware, proxyUpgrade, shareMiddleware, upgradeTarget } from './proxy.js';
@@ -189,6 +190,9 @@ function validationOf(p) {
 }
 app.get('/api/projects/:id/report', wrap((req, res) => res.json({ report: getReport(req.params.id), evidence: evidence(req.params.id) })));
 app.post('/api/projects/:id/report', wrap(async (req, res) => res.json({ report: await makeReport(req.params.id), evidence: evidence(req.params.id) })));
+// AI pre-test: the browser captures page snapshots (GET gives the page list), the server runs simulated target users on them
+app.get('/api/projects/:id/pretest', wrap((req, res) => res.json({ pretest: getPretest(req.params.id), pages: pageList(req.params.id) })));
+app.post('/api/projects/:id/pretest', wrap(async (req, res) => res.json({ pretest: await runPretest(req.params.id, req.body?.pages) })));
 
 // ---- visitor tour (shown on share links) ----
 app.get('/api/projects/:id/tour', wrap((req, res) => res.json(getTour(req.params.id) || { enabled: false, title: '', intro: '', steps: [] })));

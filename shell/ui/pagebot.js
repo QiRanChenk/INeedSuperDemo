@@ -344,5 +344,22 @@ const PageBot = (() => {
     }
   }
 
-  return { handle, snapshot, screenshot, act }; // snapshot / screenshot / act exposed for debugging from the console
+  /** Text snapshots of a few pages in a throwaway desktop frame (for the AI pre-test; doesn't touch the agent's frames). */
+  async function capture(projectId, paths) {
+    const f = document.createElement('iframe');
+    f.setAttribute('aria-hidden', 'true'); f.tabIndex = -1;
+    f.style.cssText = 'position:fixed;left:-20000px;top:0;width:1280px;height:800px;border:0;visibility:hidden';
+    document.body.appendChild(f);
+    const out = [];
+    try {
+      for (const p of paths) {
+        await navigate(f, projectId, p); await waitIdle(f);
+        if (!onProject(f, projectId)) continue;
+        out.push({ path: '/' + p, text: snapshot(f) });
+      }
+    } finally { f.remove(); }
+    return out;
+  }
+
+  return { handle, capture, snapshot, screenshot, act }; // snapshot / screenshot / act exposed for debugging from the console
 })();

@@ -239,3 +239,10 @@ body.view-board #chat, body.view-board #preview { display: none !important; } bo
 }
 .icard .shot:empty { } .icard .shot.none { height: 44px; font-size: 16px; }
 .verdict { white-space: nowrap; flex: none; }
+.rp-pre:empty { display: none; }
+.rp-pre { border: 1px dashed var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
+.rp-pre ul { margin: 0; padding-left: 18px; } .rp-pre .lbl { font-size: 12px; color: var(--muted); }
+.pre-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.pre-p { background: var(--bg); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.pre-h { display: flex; gap: 6px; align-items: center; } .pre-q { color: var(--brand); font-style: italic; }
+@media (max-width: 760px) { .pre-grid { grid-template-columns: 1fr; } }
