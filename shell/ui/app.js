@@ -522,7 +522,25 @@ function showPlan(plan) {
   ppList('data', plan.data.map(d => `${d.name}：${d.fields.join('、')}`));
   ppList('flows', plan.flows); ppList('highlights', plan.highlights); ppList('outOfScope', plan.outOfScope);
   $('#ppSample').value = plan.sampleData || ''; $('#ppNotes').value = ''; $('#ppStatus').textContent = '';
+  renderDesigns(plan.designs || [], plan.design || 0);
   npStep(2);
+}
+const LOOK_NAMES = { clean: '干净通用', industrial: '工业现场', warm: '温暖服务', bold: '活力醒目', editorial: '克制专业', compact: '紧凑数据' };
+const LAYOUT_NAMES = { topbar: '顶栏', sidebar: '侧边栏', tabbar: '手机底栏', hero: '首屏横幅', board: '状态墙' };
+let planDesign = 0;
+function renderDesigns(list, chosen) {
+  planDesign = Math.min(chosen, Math.max(0, list.length - 1));
+  const box = $('#ppDesigns'); box.innerHTML = '';
+  box.previousElementSibling.hidden = box.hidden = !list.length;
+  list.forEach((d, i) => {
+    const el = document.createElement('div'); el.className = 'pp-design' + (i === planDesign ? ' on' : '');
+    el.innerHTML = `<b></b><div class="why"></div><div class="tags"></div>`;
+    el.querySelector('b').textContent = (i === 0 ? '⭐ ' : '') + d.name;
+    el.querySelector('.why').textContent = d.why;
+    el.querySelector('.tags').innerHTML = [LOOK_NAMES[d.look], ...d.layout.split('+').map(x => LAYOUT_NAMES[x]), d.color, ...d.signature].filter(Boolean).map(t => `<span>${esc(t)}</span>`).join('');
+    el.onclick = () => { planDesign = i; box.querySelectorAll('.pp-design').forEach((x, j) => x.classList.toggle('on', j === i)); };
+    box.appendChild(el);
+  });
 }
 function readPlan() {
   return {
@@ -531,6 +549,7 @@ function readPlan() {
     data: ppValues('data').map(v => { const [name, f] = splitOnce(v); return { name, fields: f.split(/[、,，;；]/).map(x => x.trim()).filter(Boolean) }; }),
     flows: ppValues('flows'), sampleData: $('#ppSample').value.trim(), highlights: ppValues('highlights'), outOfScope: ppValues('outOfScope'),
     notes: $('#ppNotes').value.trim(),
+    designs: lastPlan?.designs || [], design: planDesign,
   };
 }
 async function genPlan(statusEl) {

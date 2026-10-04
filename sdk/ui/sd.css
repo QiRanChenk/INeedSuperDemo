@@ -8,12 +8,16 @@
   --sd-danger: #dc2626; --sd-danger-soft: #fdecec; --sd-info: #0891b2; --sd-info-soft: #e3f6fa;
   --sd-radius: 10px; --sd-shadow: 0 1px 2px rgba(16, 24, 40, .05); --sd-shadow-lg: 0 12px 32px rgba(16, 24, 40, .16);
   --sd-font: system-ui, -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  /* design-language knobs (set by .sd-look-* or your own CSS) */
+  --sd-font-head: var(--sd-font); --sd-font-num: var(--sd-font); --sd-head-weight: 700; --sd-head-track: 0;
+  --sd-h1: 24px; --sd-btn-radius: 8px; --sd-card-border: 1px solid var(--sd-line); --sd-gap: 16px; --sd-pad: 18px 20px;
+  --sd-topbar-bg: var(--sd-card); --sd-topbar-ink: var(--sd-ink); --sd-topbar-muted: var(--sd-muted); --sd-topbar-line: var(--sd-line);
 }
 *, *::before, *::after { box-sizing: border-box; }
 [hidden] { display: none !important; } /* component display rules (flex/grid) must not resurrect hidden elements */
 html { -webkit-text-size-adjust: 100%; }
 body { margin: 0; font: 15px/1.6 var(--sd-font); background: var(--sd-bg); color: var(--sd-ink); }
-h1, h2, h3, h4 { line-height: 1.3; margin: 0 0 .5em; } h1 { font-size: 24px; } h2 { font-size: 18px; } h3 { font-size: 16px; }
+h1, h2, h3, h4 { line-height: 1.3; margin: 0 0 .5em; font-family: var(--sd-font-head); font-weight: var(--sd-head-weight); letter-spacing: var(--sd-head-track); } h1 { font-size: var(--sd-h1); } h2 { font-size: 18px; } h3 { font-size: 16px; }
 p { margin: 0 0 .75em; } a { color: var(--sd-brand); text-decoration: none; } a:hover { text-decoration: underline; }
 img { max-width: 100%; }
 hr { border: 0; border-top: 1px solid var(--sd-line); margin: 16px 0; }
@@ -31,7 +35,7 @@ input[type=checkbox], input[type=radio] { width: 16px; height: 16px; accent-colo
 label { font-size: 14px; }
 button, .sd-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 16px; min-height: 38px;
-  border: 1px solid var(--sd-line); border-radius: 8px; background: #fff; cursor: pointer; white-space: nowrap;
+  border: 1px solid var(--sd-line); border-radius: var(--sd-btn-radius); background: #fff; cursor: pointer; white-space: nowrap;
   font-size: 14px; line-height: 1.2; transition: background .15s, border-color .15s, opacity .15s; text-decoration: none; color: var(--sd-ink);
 }
 button:hover, .sd-btn:hover { border-color: #cfd4dc; background: #fafbfc; text-decoration: none; }
@@ -45,15 +49,15 @@ button:disabled, .sd-btn[aria-disabled=true] { opacity: .5; cursor: not-allowed;
 .sd-btn-block { width: 100%; }
 
 /* ---------- layout ---------- */
-.sd-topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 20px; padding: 0 24px; height: 56px; background: var(--sd-card); border-bottom: 1px solid var(--sd-line); }
-.sd-brand { font-weight: 700; font-size: 16px; display: flex; align-items: center; gap: 8px; white-space: nowrap; color: var(--sd-ink); }
+.sd-topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 20px; padding: 0 24px; height: 56px; background: var(--sd-topbar-bg); color: var(--sd-topbar-ink); border-bottom: 1px solid var(--sd-topbar-line); }
+.sd-brand { font-weight: 700; font-size: 16px; display: flex; align-items: center; gap: 8px; white-space: nowrap; color: var(--sd-topbar-ink); font-family: var(--sd-font-head); }
 .sd-brand-logo { width: 28px; height: 28px; border-radius: 8px; background: var(--sd-brand); color: #fff; display: grid; place-items: center; font-size: 14px; }
 .sd-nav { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; flex: 1; } .sd-nav::-webkit-scrollbar { display: none; }
-.sd-nav a, .sd-nav button { padding: 6px 12px; border-radius: 8px; color: var(--sd-muted); border: 0; background: none; min-height: 34px; white-space: nowrap; font-size: 14px; }
-.sd-nav a:hover, .sd-nav button:hover { background: rgba(0,0,0,.04); color: var(--sd-ink); text-decoration: none; }
+.sd-nav a, .sd-nav button { padding: 6px 12px; border-radius: var(--sd-btn-radius); color: var(--sd-topbar-muted); border: 0; background: none; min-height: 34px; white-space: nowrap; font-size: 14px; }
+.sd-nav a:hover, .sd-nav button:hover { background: rgba(127,127,127,.12); color: var(--sd-topbar-ink); text-decoration: none; }
 .sd-nav .active { background: var(--sd-brand-soft); color: var(--sd-brand); font-weight: 600; }
 .sd-topbar-end { margin-left: auto; display: flex; align-items: center; gap: 8px; }
-.sd-page { max-width: 1200px; margin: 0 auto; padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+.sd-page { max-width: 1200px; margin: 0 auto; padding: 24px; display: flex; flex-direction: column; gap: var(--sd-gap); }
 .sd-page-narrow { max-width: 760px; }
 .sd-page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .sd-page-head h1 { margin: 0; } .sd-page-head p { margin: 4px 0 0; color: var(--sd-muted); }
@@ -66,7 +70,7 @@ button:disabled, .sd-btn[aria-disabled=true] { opacity: .5; cursor: not-allowed;
 .sd-spacer { flex: 1; }
 
 /* ---------- card ---------- */
-.sd-card { background: var(--sd-card); border: 1px solid var(--sd-line); border-radius: var(--sd-radius); padding: 18px 20px; box-shadow: var(--sd-shadow); min-width: 0; }
+.sd-card { background: var(--sd-card); border: var(--sd-card-border); border-radius: var(--sd-radius); padding: var(--sd-pad); box-shadow: var(--sd-shadow); min-width: 0; }
 .sd-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
 .sd-card-head h2, .sd-card-head h3 { margin: 0; font-size: 16px; }
 .sd-card-flush { padding: 0; overflow: hidden; } .sd-card-flush > .sd-card-head { padding: 14px 18px 0; }
@@ -78,9 +82,9 @@ button:disabled, .sd-btn[aria-disabled=true] { opacity: .5; cursor: not-allowed;
 .sd-stats { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
 .sd-stats:has(> :nth-child(4):last-child) { grid-template-columns: repeat(4, minmax(0, 1fr)); } /* 4 KPIs: 4 or 2×2, never 3+1 */
 @media (max-width: 960px) { .sd-stats:has(> :nth-child(4):last-child) { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-.sd-stat { background: var(--sd-card); border: 1px solid var(--sd-line); border-radius: var(--sd-radius); padding: 16px 18px; box-shadow: var(--sd-shadow); }
+.sd-stat { background: var(--sd-card); border: var(--sd-card-border); border-radius: var(--sd-radius); padding: 16px 18px; box-shadow: var(--sd-shadow); }
 .sd-stat-label { color: var(--sd-muted); font-size: 13px; }
-.sd-stat-value { font-size: 26px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.sd-stat-value { font-size: 26px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; font-family: var(--sd-font-num); }
 .sd-stat-delta { font-size: 12px; margin-top: 2px; } .sd-stat-delta.up { color: var(--sd-ok); } .sd-stat-delta.down { color: var(--sd-danger); }
 
 /* ---------- form layout ---------- */
@@ -199,3 +203,73 @@ table.sd-table { width: 100%; border-collapse: collapse; font-size: 14px; }
   button, .sd-btn { min-height: 40px; }
 }
 @media (min-width: 721px) { .sd-show-mobile { display: none !important; } }
+
+/* ======================================================================================================
+   Design languages: put ONE class on <body>. They change type, shape, density, surfaces and the top bar —
+   not just colour. Choose by industry / scene (see sdk README "设计方向"). Default (no class) = clean.
+   ====================================================================================================== */
+/* industrial — factories, logistics, field work: high contrast, dark bar, square shapes, big touch targets, mono numbers */
+.sd-look-industrial { --sd-bg: #eef0f2; --sd-radius: 4px; --sd-btn-radius: 4px; --sd-shadow: none; --sd-card-border: 1px solid #d5d9df;
+  --sd-topbar-bg: #15191f; --sd-topbar-ink: #f3f4f6; --sd-topbar-muted: #a3aab5; --sd-topbar-line: #000; --sd-head-weight: 800; --sd-head-track: .02em;
+  --sd-font-num: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; --sd-brand: #f59e0b; --sd-brand-ink: #111; --sd-brand-soft: #fff4dc; }
+.sd-look-industrial .sd-nav .active { background: var(--sd-brand); color: var(--sd-brand-ink); }
+.sd-look-industrial button, .sd-look-industrial .sd-btn { min-height: 44px; font-weight: 600; }
+.sd-look-industrial .sd-stat { border-left: 4px solid var(--sd-brand); }
+.sd-look-industrial .sd-table th { text-transform: uppercase; letter-spacing: .04em; background: #e6e9ed; color: #374151; }
+/* warm — hospitality, home, beauty, education, services to consumers: warm neutrals, serif headings, soft & roomy */
+.sd-look-warm { --sd-bg: #f8f4ee; --sd-card: #fffdf9; --sd-line: #eadfd2; --sd-ink: #3a2e25; --sd-muted: #8a7a6b; --sd-radius: 16px; --sd-btn-radius: 999px;
+  --sd-shadow: 0 2px 10px rgba(120, 80, 40, .06); --sd-font-head: "Noto Serif SC", "Songti SC", "STSong", Georgia, serif; --sd-head-weight: 600;
+  --sd-h1: 30px; --sd-pad: 22px 24px; --sd-gap: 20px; --sd-brand: #b45f3c; --sd-brand-soft: #f6e6dc; --sd-topbar-bg: #fffdf9; }
+.sd-look-warm .sd-stat-value { font-family: var(--sd-font-head); }
+/* bold — events, retail promotions, fitness, youth brands: big type, colour blocks, energetic */
+.sd-look-bold { --sd-radius: 18px; --sd-btn-radius: 12px; --sd-h1: 34px; --sd-head-weight: 800; --sd-head-track: -.01em; --sd-shadow: 0 6px 20px rgba(17, 24, 39, .08);
+  --sd-card-border: 0; --sd-brand: #e11d48; --sd-brand-soft: #ffe4ea; --sd-topbar-bg: var(--sd-brand); --sd-topbar-ink: #fff; --sd-topbar-muted: rgba(255,255,255,.8); --sd-topbar-line: transparent; }
+.sd-look-bold .sd-nav .active { background: rgba(255,255,255,.22); color: #fff; }
+.sd-look-bold .sd-brand-logo { background: #fff; color: var(--sd-brand); }
+.sd-look-bold .sd-stat { border-top: 5px solid var(--sd-brand); } .sd-look-bold .sd-stat-value { font-size: 30px; font-weight: 800; }
+/* editorial — law, consulting, finance advisory, premium brands: restrained, thin rules, lots of white space */
+.sd-look-editorial { --sd-bg: #fff; --sd-card: #fff; --sd-line: #e7e5e4; --sd-ink: #1c1917; --sd-muted: #78716c; --sd-radius: 2px; --sd-btn-radius: 2px; --sd-shadow: none;
+  --sd-card-border: 0; --sd-font-head: "Noto Serif SC", "Songti SC", Georgia, serif; --sd-head-weight: 600; --sd-h1: 32px; --sd-pad: 8px 0 20px; --sd-gap: 28px;
+  --sd-brand: #1c1917; --sd-brand-soft: #f5f5f4; --sd-topbar-line: #1c1917; }
+.sd-look-editorial .sd-card { border-bottom: 1px solid var(--sd-line); }
+.sd-look-editorial .sd-stat { border: 0; border-top: 2px solid var(--sd-ink); border-radius: 0; padding: 14px 0; box-shadow: none; }
+.sd-look-editorial .sd-card-flush { border: 1px solid var(--sd-line); }
+/* compact — finance ops, analysts, back offices with lots of data: dense, small type, tight rows */
+.sd-look-compact { font-size: 13px; --sd-radius: 6px; --sd-btn-radius: 5px; --sd-h1: 20px; --sd-pad: 12px 14px; --sd-gap: 10px; --sd-shadow: none; --sd-brand: #0f766e; --sd-brand-soft: #dff3f0; }
+.sd-look-compact .sd-table td { padding: 6px 10px; } .sd-look-compact .sd-table th { padding: 7px 10px; }
+.sd-look-compact button, .sd-look-compact .sd-btn { min-height: 30px; padding: 4px 12px; font-size: 13px; }
+.sd-look-compact :where(input, select) { min-height: 30px !important; padding: 4px 9px !important; }
+.sd-look-compact .sd-stat { padding: 10px 12px; } .sd-look-compact .sd-stat-value { font-size: 20px; }
+.sd-look-compact .sd-topbar { height: 44px; }
+
+/* ======================================================================================================
+   Layout archetypes (combine with any look)
+   ====================================================================================================== */
+/* sidebar app shell: <body class="sd-layout-sidebar"><aside class="sd-sidebar">brand + .sd-nav</aside><main class="sd-main">…</main> */
+.sd-layout-sidebar { display: grid; grid-template-columns: 228px minmax(0, 1fr); min-height: 100vh; }
+.sd-sidebar { position: sticky; top: 0; height: 100vh; overflow: auto; background: var(--sd-topbar-bg); color: var(--sd-topbar-ink); border-right: 1px solid var(--sd-topbar-line); padding: 16px 12px; display: flex; flex-direction: column; gap: 14px; }
+.sd-sidebar .sd-nav { flex-direction: column; overflow: visible; } .sd-sidebar .sd-nav a, .sd-sidebar .sd-nav button { text-align: left; justify-content: flex-start; width: 100%; }
+.sd-main { min-width: 0; }
+/* bottom tab bar for phone-first tools (field staff, front desk): <nav class="sd-tabbar"><a class="active">…</a></nav> — shown on phones only */
+.sd-tabbar { display: none; }
+/* hero header for customer-facing pages: <section class="sd-hero"><h1>…</h1><p>…</p><div class="sd-actions">…</div></section> */
+.sd-hero { background: linear-gradient(135deg, var(--sd-brand), color-mix(in srgb, var(--sd-brand) 55%, #000)); color: #fff; border-radius: var(--sd-radius); padding: 36px 32px; }
+.sd-hero h1 { color: #fff; font-size: calc(var(--sd-h1) + 8px); margin-bottom: 6px; } .sd-hero p { color: rgba(255,255,255,.85); max-width: 640px; }
+.sd-hero .sd-btn-ghost, .sd-hero button:not(.sd-btn-primary) { background: rgba(255,255,255,.14); color: #fff; border-color: rgba(255,255,255,.3); }
+/* status board / wall for monitoring screens: <div class="sd-board"><div class="sd-tile ok"><div class="sd-tile-label">…</div><div class="sd-tile-value">…</div></div></div> */
+.sd-board { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+.sd-tile { background: var(--sd-card); border-radius: var(--sd-radius); padding: 14px 16px; border-left: 6px solid #9ca3af; box-shadow: var(--sd-shadow); min-width: 0; }
+.sd-tile.ok { border-left-color: var(--sd-ok); } .sd-tile.warn { border-left-color: var(--sd-warn); background: color-mix(in srgb, var(--sd-warn-soft) 60%, var(--sd-card)); }
+.sd-tile.danger { border-left-color: var(--sd-danger); background: color-mix(in srgb, var(--sd-danger-soft) 70%, var(--sd-card)); } .sd-tile.off { opacity: .6; }
+.sd-tile-label { font-size: 13px; color: var(--sd-muted); } .sd-tile-value { font-size: 24px; font-weight: 700; font-family: var(--sd-font-num); }
+@media (max-width: 720px) {
+  .sd-layout-sidebar { display: block; }
+  .sd-sidebar { position: sticky; z-index: 20; height: auto; flex-direction: row; align-items: center; padding: 8px 12px; gap: 10px; border-right: 0; border-bottom: 1px solid var(--sd-topbar-line); }
+  .sd-sidebar .sd-nav { flex-direction: row; overflow-x: auto; } .sd-sidebar .sd-nav a, .sd-sidebar .sd-nav button { width: auto; }
+  .sd-tabbar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; background: var(--sd-card); border-top: 1px solid var(--sd-line); padding-bottom: env(safe-area-inset-bottom); }
+  .sd-tabbar > * { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 0; font-size: 11px; color: var(--sd-muted); border: 0; background: none; min-height: 56px; text-decoration: none; }
+  .sd-tabbar > .active { color: var(--sd-brand); font-weight: 600; }
+  body:has(.sd-tabbar) { padding-bottom: 72px; } body:has(.sd-tabbar) .sd-topbar .sd-nav { display: none; }
+  .sd-hero { padding: 24px 18px; border-radius: 0; margin: -16px -14px 0; } .sd-hero h1 { font-size: calc(var(--sd-h1) + 2px); }
+  .sd-board { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; } .sd-tile-value { font-size: 20px; }
+}

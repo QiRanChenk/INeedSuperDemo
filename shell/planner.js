@@ -3,7 +3,10 @@
 import { chat } from './llm.js';
 import { logUsage } from './usagelog.js';
 import { normalizeUsage } from './agent.js';
-import { SKELETONS } from './registry.js';
+import { SKELETONS, listProjects } from './registry.js';
+
+export const LOOKS = { clean: '干净通用', industrial: '工业现场', warm: '温暖服务', bold: '活力醒目', editorial: '克制专业', compact: '紧凑数据' };
+export const LAYOUTS = { topbar: '顶栏', sidebar: '侧边栏应用', tabbar: '手机底部标签', hero: '首屏横幅', board: '状态墙' };
 
 const SYSTEM = `你是资深的产品顾问，帮业务人员把一句话想法变成可以马上动手做的 Demo 方案。Demo 是一个 Web 应用（电脑和手机都能用），用于验证想法、给客户或同事演示。
 只输出一个 JSON 对象，不要任何解释或代码块标记。字段：
@@ -17,13 +20,30 @@ const SYSTEM = `你是资深的产品顾问，帮业务人员把一句话想法�
   "flows": ["关键使用流程，每条一句，按用户视角写，如：销售新增客户 → 记录拜访 → 主管在看板查看转化"],
   "sampleData": "准备什么样的示例数据让 Demo 看起来真实（数量、分布、时间跨度）",
   "highlights": ["让演示出彩的 1-3 个点，可包含 AI 能力，如：AI 自动总结拜访记录"],
-  "outOfScope": ["这一版先不做的，避免范围过大，如：登录与权限、短信通知"]
+  "outOfScope": ["这一版先不做的，避免范围过大，如：登录与权限、短信通知"],
+  "designs": [{
+    "name": "设计方向名，4-8 字，如：车间看板风",
+    "why": "为什么适合：从行业气质、谁在什么场景用（设备、光线、时长、是否给客户看）推导，一句话",
+    "look": "设计语言，从 ${Object.keys(LOOKS).join(' / ')} 选一个",
+    "layout": "布局，从 ${Object.keys(LAYOUTS).join(' / ')} 选 1-2 个，用 + 连接，如 sidebar+board",
+    "color": "主色及理由，如：安全橙 #f59e0b（车间警示色）",
+    "signature": ["这个行业专属的界面元素 2-3 个，如：设备状态墙、扫码大按钮、可打印报价单、桌台平面图"]
+  }]
 }
+designs 给 2-3 个明显不同的设计方向（设计语言、布局、专属元素都要有区别），第一个是最推荐的；它们必须来自对行业和使用场景的推导，不是随机风格，也不要只是换颜色。
 要求：这是第一版 Demo，只做最能体现价值的部分——页面 2-3 个、流程 2-4 条、数据对象 1-3 个，宁少勿滥（其余放进 outOfScope，以后再迭代）；不要写技术实现（数据库、接口、框架）；全部用中文。`;
 
 /** description -> plan object. Throws on LLM failure. */
+/** look+layout of the most recent plans, so the planner can steer away from repeating itself. */
+function recentDesigns(n = 6) {
+  return listProjects().filter(p => p.plan?.designs?.length).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, n)
+    .map(p => { const d = p.plan.designs[p.plan.design || 0] || p.plan.designs[0]; return `${p.name}：${d.look} + ${d.layout}`; });
+}
+
 export async function makePlan(description) {
-  const r = await chat({ temperature: 0.4, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: String(description).slice(0, 4000) }] });
+  const recent = recentDesigns();
+  const user = String(description).slice(0, 4000) + (recent.length ? `\n\n（最近其他项目用过的设计：${recent.join('；')}。若别的方向同样合适，优先换一种，避免所有 Demo 长得一样；行业确实最适合同一种时可以重复。）` : '');
+  const r = await chat({ temperature: 0.6, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: user }] });
   const u = normalizeUsage(r.usage);
   if (u) logUsage({ p: '_planning', i: u.input, o: u.output, c: u.cached });
   return normalizePlan(parseJson(r.message.content || ''));
@@ -50,8 +70,25 @@ export function normalizePlan(p = {}) {
     highlights: strList(p.highlights, 4),
     outOfScope: strList(p.outOfScope, 6),
     notes: String(p.notes || '').trim(),
+    designs: (Array.isArray(p.designs) ? p.designs : []).slice(0, 3).map(d => ({
+      name: String(d?.name || '').trim().slice(0, 20), why: String(d?.why || '').trim().slice(0, 200),
+      look: LOOKS[d?.look] ? d.look : 'clean',
+      layout: String(d?.layout || 'topbar').split(/[+＋,，\s]+/).filter(x => LAYOUTS[x]).slice(0, 2).join('+') || 'topbar',
+      color: String(d?.color || '').trim().slice(0, 60), signature: strList(d?.signature, 4),
+    })).filter(d => d.name),
+    design: Math.max(0, Number.isInteger(p.design) ? p.design : 0),
   };
 }
+
+/** The chosen design direction (or null). */
+export const chosenDesign = p => p.designs?.[Math.min(p.design || 0, (p.designs?.length || 1) - 1)] || null;
+const designText = d => [
+  `- 方向：${d.name}${d.why ? `（${d.why}）` : ''}`,
+  `- 设计语言：body 加 class sd-look-${d.look}（${LOOKS[d.look]}）${d.look === 'clean' ? '，即默认样式' : ''}`,
+  `- 布局：${d.layout.split('+').map(x => LAYOUTS[x]).join(' + ')}`,
+  d.color && `- 主色：${d.color}（写在 body { --sd-brand: … }）`,
+  d.signature.length && `- 行业专属元素（必须做出来）：${d.signature.join('、')}`,
+].filter(Boolean);
 
 /** The confirmed plan as the first instruction to the build agent. */
 export function planToMessage(plan, description) {
@@ -69,6 +106,7 @@ export function planToMessage(plan, description) {
     sec('示例数据', [p.sampleData].filter(Boolean)),
     sec('演示亮点', p.highlights.map(x => `- ${x}`)),
     sec('这一版不做', p.outOfScope.map(x => `- ${x}`)),
+    sec('设计方向（已确认）', chosenDesign(p) ? [...designText(chosenDesign(p)), '- 按 SDK 文档「设计方向要求」实现：先定布局和专属元素，颜色最后；不要套「标题 + 4 指标卡 + 表格」的固定模式，除非它确实是这个方向最好的表达。'] : []),
     sec('用户补充', [p.notes].filter(Boolean)),
     '## 工作方式（请照做，效率优先，目标 40–60 步内完成）',
     '1. 读骨架的 server.js 和页面文件了解结构（SDK 用法看系统提示里的文档，不要读 sdk/ 源码），然后一次写好后端：数据表 + 接口 + 示例数据。示例数据贴近业务即可，用 http_request 校验一次，不要反复打磨数值和分布。',

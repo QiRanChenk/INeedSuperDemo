@@ -199,3 +199,7 @@ body.no-preview { grid-template-columns: var(--sb) 1fr; } body.no-preview #previ
   .row { flex-wrap: wrap; }
 }
 .excard input, .excard textarea { font: inherit; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); width: 100%; }
+.pp-designs { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.pp-design { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.pp-design b { color: var(--ink); font-size: 13px; } .pp-design.on { border-color: var(--brand); background: rgba(91,141,239,.08); }
+.pp-design .tags { display: flex; flex-wrap: wrap; gap: 4px; } .pp-design .tags span { background: var(--bg); border-radius: 6px; padding: 1px 6px; }

@@ -74,7 +74,26 @@ const { markdown, profile, usage } = await analyze({
 <link rel="stylesheet" href="_sd/sd.css">          <!-- 相对路径，放在自己的 style.css 之前 -->
 <script src="_sd/sd.js"></script>                   <!-- 放在自己的 app.js 之前，提供全局 sd -->
 ```
-主题色：在自己的 CSS 里覆盖 `:root { --sd-brand: #0f9d58; --sd-brand-soft: #e6f4ea; }`（另有 --sd-bg / --sd-card / --sd-ink / --sd-muted / --sd-line / --sd-radius）。
+主题色等变量写在 body 上：`body { --sd-brand: #0f9d58; --sd-brand-soft: #e6f4ea; }`（写在 :root 会被设计语言覆盖）。可调变量：--sd-bg / --sd-card / --sd-ink / --sd-muted / --sd-line / --sd-radius / --sd-btn-radius / --sd-font-head / --sd-font-num / --sd-h1 / --sd-pad / --sd-gap / --sd-topbar-bg / --sd-topbar-ink。
+
+**设计语言（body 上加一个 class，改变字体、形状、密度、表面、顶栏，不只是颜色）**
+| class | 适合 | 特征 |
+|---|---|---|
+| （不加）| 通用内部工具 | 干净、蓝色、中等圆角 |
+| `sd-look-industrial` | 工厂、仓储、物流、巡检、工地 | 深色顶栏、高对比、方角、大按钮、等宽数字、琥珀色 |
+| `sd-look-warm` | 酒店、餐饮、家装、美业、教育、面向消费者的服务 | 暖米底色、衬线标题、大圆角、宽松留白、陶土色 |
+| `sd-look-bold` | 活动、促销、健身、年轻品牌、报名 | 品牌色顶栏、大字号粗标题、色块、指标卡色条 |
+| `sd-look-editorial` | 律所、咨询、投顾、高端品牌、出版 | 白底细线、衬线大标题、无阴影、大留白、黑白克制 |
+| `sd-look-compact` | 财务、运营后台、分析师、数据很多的系统 | 小字号、紧凑行距、小控件、青绿色 |
+
+**布局原型（可与任一设计语言组合）**
+- 顶栏型（默认）：`.sd-topbar` + `.sd-page`
+- 侧边栏应用：`<body class="sd-layout-sidebar sd-look-…"><aside class="sd-sidebar"><div class="sd-brand">…</div><nav class="sd-nav">…</nav></aside><main class="sd-main"><div class="sd-page">…</div></main>` —— 页面多、长时间使用的后台
+- 手机优先 + 底部标签栏：`<nav class="sd-tabbar"><a class="active" href="./">🏠<span>首页</span></a>…</nav>`（只在手机显示，手机上自动隐藏顶栏导航）—— 一线人员、前台、现场巡检
+- 首屏横幅：`<section class="sd-hero"><h1>…</h1><p>…</p><div class="sd-actions">…</div></section>` —— 面向客户的页面、报名、报价、活动
+- 状态墙：`<div class="sd-board"><div class="sd-tile ok|warn|danger|off"><div class="sd-tile-label">…</div><div class="sd-tile-value">…</div></div></div>` —— 设备、工位、房间、桌台等一屏看全的监控
+
+**设计方向要求**：按方案里的设计方向选设计语言和布局，并做出行业专属的界面元素（如签到台的大号输入键盘、巡检的设备状态墙、报价的可打印报价单、餐饮的桌台图）——**颜色是最后一步，不是唯一的差异**。不要每个项目都是「标题 + 4 张指标卡 + 表格」。
 
 **布局 class**：`sd-topbar`（顶栏，含 `sd-brand` 品牌 + `sd-brand-logo` 方块图标、`sd-nav` 导航、`sd-topbar-end` 右侧区）→ `sd-page`（内容容器，`sd-page-narrow` 窄版）→ `sd-page-head`（h1 + p 说明 + `sd-actions` 按钮组）；`sd-card`（`sd-card-head` 标题行，`sd-card-flush` 无内边距，适合放表格）；`sd-grid`（自适应卡片网格）/`sd-grid-2`/`sd-grid-3`（手机自动单列）；`sd-row`、`sd-stack`、`sd-spacer`。
 **组件 class**：按钮 `sd-btn-primary` / `sd-btn-danger` / `sd-btn-ghost` / `sd-btn-sm` / `sd-btn-block`（type=submit 默认主按钮）；指标卡 `sd-stats` > `sd-stat` > `sd-stat-label` + `sd-stat-value` + `sd-stat-delta up|down`；表单 `sd-form`（两列，手机单列）> `sd-field`（label + 控件 + `sd-hint`），`sd-field-full` 占整行，必填 label 加 `sd-req`，`sd-form-actions` 按钮行；筛选栏 `sd-toolbar`，搜索框 `<div class="sd-search"><input></div>`；状态标签 `sd-tag ok|warn|danger|info|brand`；页签 `sd-tabs`、分段 `sd-seg`（子元素 `.active`）；空状态 `sd-empty`；列表 `sd-list`；`sd-muted` / `sd-small` / `sd-hide-mobile` / `sd-show-mobile`。
