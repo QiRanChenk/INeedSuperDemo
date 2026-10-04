@@ -518,7 +518,7 @@ function runCommand(cwd, command, signal) {
  * Run one agent turn: user message -> tool loop -> final assistant text.
  * onEvent receives { type, ... } events for the UI stream.
  */
-export async function runAgent(id, userMessage, onEvent, sessionId) {
+export async function runAgent(id, userMessage, onEvent, sessionId, opts = {}) {
   const project = readProject(id);
   if (!project) throw new Error('project not found');
   if (running.has(id)) throw new Error('该项目正在处理上一条消息');
@@ -526,7 +526,7 @@ export async function runAgent(id, userMessage, onEvent, sessionId) {
   const run = makeRun(sid, onEvent);
   running.set(id, run);
   const snap = beginSnapshot(id, sid, userMessage);
-  try { return await runAgentInner(project, userMessage, run, sid); }
+  try { return await runAgentInner(project, userMessage, run, sid, opts); }
   catch (e) { run.emit({ type: 'error', message: e.message }); e.emitted = true; throw e; }
   finally {
     const v = endSnapshot(id, snap);
@@ -553,10 +553,13 @@ function endSnapshot(id, snap) {
 const STOP_NOTE = '（用户已停止本轮处理）';
 const SOFT_STEPS = 40; // validation demos should be done well before this
 
-async function runAgentInner(project, userMessage, run, sid) {
+async function runAgentInner(project, userMessage, run, sid, opts = {}) {
   const id = project.id;
   const onEvent = run.emit, signal = run.ctrl.signal;
   const settings = getSettings();
+  // a per-turn budget (e.g. the first build of a validation demo) caps the run below the global limit
+  if (opts.budget > 0) settings.maxIterations = Math.min(settings.maxIterations, opts.budget);
+  const softAt = opts.budget > 0 ? Math.round(settings.maxIterations * 0.7) : Math.min(SOFT_STEPS, Math.round(settings.maxIterations * 0.8));
   const history = loadHistory(id, sid);
   // persist after every message so the UI can replay an in-progress turn when switching projects/sessions
   const push = m => { history.push(m); appendHistory(id, sid, m); };
@@ -618,7 +621,7 @@ async function runAgentInner(project, userMessage, run, sid) {
     if (web.length && i > 0) { push({ role: 'user', content: webErrorNote(web), ts: Date.now(), system: true }); onEvent({ type: 'web_errors', count: web.length }); rebuild(); }
     // budget: tell the model before it runs out, so it ends with something usable and a summary
     // soft budget: a turn that is still going after SOFT_STEPS (or 80% of the hard limit) is asked to wrap up
-    const left = settings.maxIterations - i, soft = Math.min(SOFT_STEPS, Math.round(settings.maxIterations * 0.8));
+    const left = settings.maxIterations - i, soft = softAt;
     if (i > 0 && (i === soft || left === 2)) {
       push({ role: 'user', system: true, ts: Date.now(), content: left === 2
         ? '[系统] 只剩最后 2 步：不要再改代码，确认项目能正常启动后，直接向用户总结已完成的内容、怎么演示、还没做完的部分。'

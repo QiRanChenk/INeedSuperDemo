@@ -306,7 +306,8 @@ app.post('/api/projects/:id/chat', wrap(async (req, res) => {
   if (isBusy(id)) return res.status(409).json({ error: '该项目正在处理上一条消息' });
 
   const { send, end } = sse(res);
-  try { await runAgent(id, message, send, sid(req)); }
+  const budget = Number(req.body?.budget) > 0 ? Math.min(200, Number(req.body.budget)) : 0;
+  try { await runAgent(id, message, send, sid(req), { budget }); }
   catch (e) { if (!e.emitted) send({ type: 'error', message: e.message }); } // run errors are already emitted as events by runAgent
   finally { end(); }
 }));

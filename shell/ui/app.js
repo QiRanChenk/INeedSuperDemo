@@ -307,7 +307,8 @@ async function interject(text) {
     if (!r.queued) { if (!isBusy(current)) return send(text); addMsg(pid, 'error', '未能插话：本轮已结束，请重新发送'); $('#input').value = text; renderHeader(); }
   } catch (e) { addMsg(pid, 'error', '插话失败：' + e.message); $('#input').value = text; renderHeader(); }
 }
-async function send(text) {
+const FIRST_BUILD_BUDGET = 50; // validation demos: fast first version, iterate afterwards
+async function send(text, opts = {}) {
   if (!current || !text.trim()) return;
   if (isBusy(current)) return interject(text);
   const projectId = current.id, sid = currentSession, pid = viewKey();
@@ -316,7 +317,7 @@ async function send(text) {
   addMsg(pid, 'user', text);
   showThinking(pid, '思考中…');
   try {
-    const res = await fetch(`/api/projects/${projectId}/chat`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: text, session: sid }) });
+    const res = await fetch(`/api/projects/${projectId}/chat`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: text, session: sid, budget: opts.budget }) });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
     await readEvents(res, pid, (p, ev) => { handleEvent(p, ev); return p; });
   } catch (e) { addMsg(pid, 'error', e.message); }
@@ -575,7 +576,7 @@ async function createAndStart(body, statusEl, btn) {
     const p = await api('/api/projects', { method: 'POST', body });
     $('#dlgNew').close();
     await loadProjects(); await select(p.id);
-    send(p.firstMessage);
+    send(p.firstMessage, { budget: FIRST_BUILD_BUDGET });
   } catch (e) { statusEl.textContent = '✗ ' + e.message; }
   finally { btn.disabled = false; }
 }
