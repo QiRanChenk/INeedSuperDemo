@@ -149,6 +149,7 @@ function renderHeader() {
   if (has && !live && $('#frame').src !== 'about:blank') $('#frame').src = 'about:blank';
   if (live && current.hasUi && $('#frame').src === 'about:blank') $('#frame').src = `/p/${current.id}/`;
   $('#btnClear').disabled = !has || busy;
+  updateSketchOverlay(busy);
   // busy: empty input -> stop button; typed text -> interject (queued into the running turn)
   const sendBtn = $('#send'), typed = !!$('#input').value.trim(), isStopping = busy && stopping.has(current.id);
   sendBtn.disabled = !has || isStopping;
@@ -548,6 +549,19 @@ function renderDesigns(list, chosen) {
   });
   $('#ppSketch').hidden = !list.length;
 }
+
+// while the first build runs, the preview shows the chosen sketch (the target) instead of the half-built page
+const sketchHidden = new Set();
+let sketchShownFor = null;
+async function updateSketchOverlay(busy) {
+  const id = current?.id, show = !!id && busy && current.validation?.sketchPending && !sketchHidden.has(id);
+  $('#sketchOverlay').hidden = !show;
+  if (!show) { sketchShownFor = null; return; }
+  if (sketchShownFor === id) return;
+  sketchShownFor = id;
+  try { const html = await fetch(`/api/projects/${id}/sketch`).then(r => (r.ok ? r.text() : '')); if (current?.id === id && html) $('#soFrame').srcdoc = await sketchDoc(html); } catch {}
+}
+$('#soHide').onclick = () => { sketchHidden.add(current.id); $('#sketchOverlay').hidden = true; };
 
 // ---------- design sketches: a static mock of the core screen per direction, to compare before building ----------
 let sdCss = null;

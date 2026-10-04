@@ -19,8 +19,13 @@ const kit = () => {
 export function cleanSketch(html) {
   let t = String(html || '').replace(/^```(?:html)?\s*|\s*```\s*$/g, '').trim();
   const s = t.search(/<!doctype|<html/i); if (s > 0) t = t.slice(s);
-  return t.replace(/<script\b[\s\S]*?<\/script\s*>/gi, '').replace(/<script\b[^>]*>/gi, '')
+  t = t.replace(/<script\b[\s\S]*?<\/script\s*>/gi, '').replace(/<script\b[^>]*>/gi, '')
     .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '').replace(/javascript:/gi, '').slice(0, 80000);
+  // cut off mid-way (output limit): drop the dangling partial tag and close the document, and say so for the agent
+  const end = t.search(/<\/html\s*>(?![\s\S]*<\/html\s*>)/i);
+  if (end >= 0) t = t.slice(0, end) + '</html>'; // drop any prose after the document
+  else if (/<body/i.test(t)) t = t.replace(/<[^>]*$/, '') + '\n<!-- 草图到这里被截断（后面没有内容了），按已有部分理解即可 -->\n</body></html>';
+  return t;
 }
 
 export async function makeSketch(rawPlan, index = 0, description = '') {
@@ -39,23 +44,31 @@ export async function makeSketch(rawPlan, index = 0, description = '') {
     d.signature.length && `行业专属元素（必须画出来）：${d.signature.join('、')}`,
   ].filter(Boolean).join('\n');
   // gateways' output moderation occasionally trips on realistic sample data (names, phone numbers, medical values): retry once
-  const call = () => chat({ thinking: false, temperature: 0.7, messages: [
+  const call = (extra = []) => chat({ thinking: false, maxTokens: 16000, temperature: 0.7, messages: [
     { role: 'system', content: `你是顶尖的产品界面设计师。为一个「验证用 Demo」画核心页面（第一个页面）的静态高保真草图：一个完整的 HTML 文档，${mobile ? '手机竖屏（宽 390px）下的样子，底部标签栏导航' : '电脑宽屏下的样子'}，让人一眼看出这是哪个行业、给谁用、价值在哪。
 要求：
 - <head> 里只引入 <link rel="stylesheet" href="_sd/sd.css">，再加一个 <style> 写这个方向专属的样式；不要 <script>、不要外部字体/图片/CDN（图标用 emoji 或 CSS 画）。
 - 用组件库的类（下面的文档）搭骨架，按设计方向定布局和气质，专属元素要做得像真的；不要套「标题 + 4 指标卡 + 表格」的固定模式，除非它确实是最好的表达。
 - 导航只放方案里的页面（1-2 个），不要画方案外的菜单入口——Demo 只做这些。
+- 写得紧凑：整份 HTML 控制在 400 行以内，样式写简洁，列表 6-8 条就够，重复结构不要写太多条；一定要写完整，以 </html> 结尾。
 - 示例数据要像真实业务（具体的人名、地名、编号、金额、时间），数量够撑满页面。界面文字全用中文业务语言，不出现技术词。
 - 只输出 HTML，不要解释。
 组件库文档：
 ${kit()}` },
-    { role: 'user', content: brief },
+    { role: 'user', content: brief }, ...extra,
   ] });
   let r;
   try { r = await call(); } catch (e) { if (!/inappropriate|sensitive|安全|审核/i.test(e.message)) throw e; r = await call(); }
-  const u = normalizeUsage(r.usage);
-  if (u) logUsage({ p: '_planning', i: u.input, o: u.output, c: u.cached });
-  const html = cleanSketch(r.message.content);
+  const usage = r => { const u = normalizeUsage(r.usage); if (u) logUsage({ p: '_planning', i: u.input, o: u.output, c: u.cached }); };
+  usage(r);
+  // gateways cap one answer (~8k tokens here): continue from where it stopped, up to twice
+  let out = String(r.message.content || '').replace(/\s*```\s*$/, '');
+  for (let k = 0; k < 2 && /<body/i.test(out) && !/<\/html\s*>/i.test(out); k++) {
+    const c = await call([{ role: 'assistant', content: out }, { role: 'user', content: '输出被截断了。从上面最后一个字符处接着往下写，直接输出剩余的 HTML（不要重复已经写过的内容，不要代码块标记，不要解释），写到 </html> 结束。' }]);
+    usage(c);
+    out += String(c.message.content || '').replace(/^```(?:html)?\s*/, '').replace(/\s*```\s*$/, '');
+  }
+  const html = cleanSketch(out);
   if (!/<body/i.test(html)) throw new Error('草图生成失败，请重试');
   return { html, device: mobile ? 'mobile' : 'desktop' };
 }

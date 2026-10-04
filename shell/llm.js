@@ -18,7 +18,7 @@ export class StoppedError extends Error { constructor() { super('已停止'); th
 const THINKING_OFF = { enable_thinking: false, thinking: { type: 'disabled' } };
 let thinkingParamsOk = true;
 
-export async function chat({ messages, tools, temperature, settings, onDelta, signal, thinking }) {
+export async function chat({ messages, tools, temperature, settings, onDelta, signal, thinking, maxTokens }) {
   const s = settings || getSettings();
   if (!s.baseUrl || !s.model) throw new Error('LLM 未配置：请先在设置中填写 Base URL / Model / API Key');
   if (signal?.aborted) throw new StoppedError();
@@ -27,6 +27,7 @@ export async function chat({ messages, tools, temperature, settings, onDelta, si
   const body = { model: s.model, messages, temperature: temperature ?? s.temperature, stream };
   if (stream) body.stream_options = { include_usage: true };
   if (tools?.length) { body.tools = tools; body.tool_choice = 'auto'; }
+  if (maxTokens) body.max_tokens = maxTokens;
   const switchOff = thinking === false && thinkingParamsOk;
   if (switchOff) Object.assign(body, THINKING_OFF);
 
@@ -48,7 +49,7 @@ export async function chat({ messages, tools, temperature, settings, onDelta, si
       if (switchOff && res.status === 400 && /thinking|unrecognized|unknown|extra|not permitted|additional/i.test(text)) {
         thinkingParamsOk = false;
         clearTimeout(timer); signal?.removeEventListener('abort', onStop);
-        return chat({ messages, tools, temperature, settings, onDelta, signal });
+        return chat({ messages, tools, temperature, settings, onDelta, signal, maxTokens });
       }
       throw new Error(`LLM HTTP ${res.status}: ${text.slice(0, 500)}`);
     }

@@ -427,20 +427,23 @@ async function execTool(project, name, args, ctx) {
       return fileTree(id, args.path || '.').join('\n') || '(empty)';
     case 'read_file':
       if (isSdkPath(args.path) && !args.force && !/README\.md$/i.test(args.path)) return SDK_SOURCE_NOTE;
+      // loop guard: some models (esp. without reasoning) re-read the same unchanged file over and over
+      { const k = String(args.path).trim().replace(/^\.\//, ''); ctx.reads ||= {}; ctx.reads[k] = (ctx.reads[k] || 0) + 1;
+        if (ctx.reads[k] > 4) return `NOTE: ${k} 本轮已经读了 ${ctx.reads[k] - 1} 次且没有改动过，内容不会变（文件末尾就是最后一行，没有更多内容）。不要再读它，根据已经读到的内容直接开始写代码；需要找某段时用 grep。`; }
       // the confirmed design sketch is read whole in one call (it's the reference for the first build)
       return readText(safePath(id, args.path), args.path, { ...args, max: /^(\.\/)?sketch\.html$/.test(String(args.path).trim()) ? 90000 : undefined });
     case 'write_file': {
       const abs = safePath(id, args.path);
       fs.mkdirSync(path.dirname(abs), { recursive: true });
       fs.writeFileSync(abs, args.content ?? '');
-      ctx.changed.add(args.path);
+      ctx.changed.add(args.path); if (ctx.reads) delete ctx.reads[String(args.path).trim().replace(/^\.\//, '')];
       return `OK: wrote ${args.path} (${Buffer.byteLength(args.content ?? '')} bytes)` + await syntaxNote(abs, args.path);
     }
     case 'edit_file': {
       const abs = safePath(id, args.path);
       const r = editFile(abs, args.path, args);
       if (!r.ok) return r.message;
-      ctx.changed.add(args.path);
+      ctx.changed.add(args.path); if (ctx.reads) delete ctx.reads[String(args.path).trim().replace(/^\.\//, '')];
       return r.message + await syntaxNote(abs, args.path);
     }
     case 'delete_file': {
@@ -644,7 +647,7 @@ async function runAgentInner(project, userMessage, run, sid, opts = {}) {
     let r;
     const call = (images = true) => {
       const msgs = withImages(id, messages, images && visionEnabled(settings));
-      return { images: hasImage(msgs), p: chat({ messages: msgs, tools: TOOLS, settings, signal, onDelta: d => onEvent({ type: 'delta', ...d }) }) };
+      return { images: hasImage(msgs), p: chat({ messages: msgs, tools: TOOLS, settings, signal, thinking: settings.agentThinking === 'off' ? false : undefined, onDelta: d => onEvent({ type: 'delta', ...d }) }) };
     };
     try {
       let c = call();

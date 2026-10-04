@@ -10,7 +10,7 @@ app.post('api/items', (req, res, ctx) => ctx.json({ received: ctx.body }));   //
 app.static('public');                     // 静态目录，/ 映射 public/index.html
 app.listen();                             // 端口取 process.env.PORT
 ```
-ctx 提供：`params`、`query`、`body`、`json(data, status)`、`text(s, status)`、`html(s, status)`。
+ctx 提供：`params`、`query`、`body`、`json(data, status)`、`text(s, status)`、`html(s, status)`。（也兼容 Express 写法：`req.params` / `req.query` / `req.body`、`res.status(404).json({...})`。）
 
 ## LLM：`llm`
 - `await llm.complete(prompt, { system, temperature, onUsage })` → string

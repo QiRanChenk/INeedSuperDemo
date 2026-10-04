@@ -46,6 +46,11 @@ export function createApp() {
           if (!m) continue;
           r.keys.forEach((k, i) => ctx.params[k] = decodeURIComponent(m[i + 1]));
           if (['POST', 'PUT', 'PATCH'].includes(req.method)) ctx.body = await readBody(req);
+          // Express habits work too: req.params / req.query / req.body, res.status(n).json(data)
+          req.params = ctx.params; req.query = ctx.query; req.body = ctx.body;
+          res.status ??= code => { res.statusCode = code; return res; };
+          res.json ??= data => ctx.json(data, res.statusCode && res.statusCode !== 200 ? res.statusCode : 200);
+          res.send ??= data => (typeof data === 'object' && data !== null && !Buffer.isBuffer(data) ? res.json(data) : ctx.text(String(data ?? ''), res.statusCode || 200));
           return await r.handler(req, res, ctx);
         }
         if (req.method === 'GET' && url.pathname.startsWith('/_sd/') && serveStatic(UI_DIR, url.pathname.slice(4), res)) return;

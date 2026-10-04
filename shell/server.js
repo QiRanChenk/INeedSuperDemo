@@ -44,7 +44,7 @@ const publicSettings = s => ({
 });
 app.get('/api/settings', (req, res) => res.json({ ...publicSettings(getSettings()), presets: PRESETS }));
 app.put('/api/settings', wrap(async (req, res) => {
-  const { baseUrl, apiKey, model, temperature, maxIterations, contextWindow, stream, projectLlm, vision } = req.body || {};
+  const { baseUrl, apiKey, model, temperature, maxIterations, contextWindow, stream, projectLlm, vision, agentThinking } = req.body || {};
   const before = JSON.stringify(getProjectLlm());
   const patch = {};
   if (projectLlm && typeof projectLlm === 'object') {
@@ -64,6 +64,7 @@ app.put('/api/settings', wrap(async (req, res) => {
   if (contextWindow !== undefined && Number.isInteger(cw) && cw >= 1000 && cw <= 100_000_000) patch.contextWindow = cw;
   if (stream !== undefined) patch.stream = !!stream;
   if (['auto', 'on', 'off'].includes(vision)) patch.vision = vision;
+  if (['on', 'off'].includes(agentThinking)) patch.agentThinking = agentThinking;
   // model / endpoint / vision mode changed -> image support has to be detected again
   const cur = getSettings();
   if ((patch.vision && patch.vision !== cur.vision) || (patch.model && patch.model !== cur.model) || (patch.baseUrl && patch.baseUrl !== cur.baseUrl)) { patch.visionOk = null; patch.visionError = ''; }
@@ -106,6 +107,11 @@ app.post('/api/projects/name', wrap(async (req, res) => {
 }));
 // design sketch of one direction of a plan (static HTML, shown sandboxed; sd.css served from the shell for it)
 app.use('/_sd', express.static(path.join(SDK_DIR, 'ui')));
+app.get('/api/projects/:id/sketch', wrap((req, res) => {
+  const f = path.join(projectDir(req.params.id), 'sketch.html');
+  if (!fs.existsSync(f)) return res.status(404).json({ error: 'no sketch' });
+  res.type('text/plain').send(fs.readFileSync(f, 'utf8')); // shown sandboxed via srcdoc by the shell UI
+}));
 app.post('/api/projects/sketch', wrap(async (req, res) => {
   res.json(await makeSketch(req.body?.plan || {}, Number(req.body?.index) || 0, req.body?.description || ''));
 }));
@@ -195,9 +201,10 @@ function validationOf(p) {
   const stage = isBusy(p.id) || !chatted ? 'building' : report ? 'concluded' : shares ? 'validating' : 'ready';
   let thumb = null;
   try { thumb = fs.readdirSync(path.join(ROOT, 'projects', p.id, '.superdemo', 'shots')).filter(f => f.endsWith('.jpg') && !f.endsWith('-m.jpg')).sort().pop() || null; } catch {} // desktop shots only
+  const sketchPending = !p.built && fs.existsSync(path.join(projectDir(p.id), 'sketch.html'));
   const pt = getPretest(p.id), pretest = pt ? { up: 0, meh: 0, down: 0 } : null;
   for (const x of pt?.personas || []) pretest[x.reaction]++;
-  return { stage, hypothesis: p.plan?.hypothesis || '', reactions, pretest, feedback: fb.length, shares, verdict: report?.verdict || null, verdictLabel: report ? VERDICTS[report.verdict] : null, thumb };
+  return { stage, hypothesis: p.plan?.hypothesis || '', reactions, pretest, sketchPending, feedback: fb.length, shares, verdict: report?.verdict || null, verdictLabel: report ? VERDICTS[report.verdict] : null, thumb };
 }
 app.get('/api/projects/:id/report', wrap((req, res) => res.json({ report: getReport(req.params.id), evidence: evidence(req.params.id) })));
 app.post('/api/projects/:id/report', wrap(async (req, res) => res.json({ report: await makeReport(req.params.id), evidence: evidence(req.params.id) })));
@@ -326,7 +333,11 @@ app.post('/api/projects/:id/chat', wrap(async (req, res) => {
   const budget = Number(req.body?.budget) > 0 ? Math.min(200, Number(req.body.budget)) : 0;
   try { await runAgent(id, message, send, sid(req), { budget }); }
   catch (e) { if (!e.emitted) send({ type: 'error', message: e.message }); } // run errors are already emitted as events by runAgent
-  finally { end(); }
+  finally {
+    // first build over: the preview stops showing the design sketch in place of the half-built page
+    const p = readProject(id); if (p && !p.built) writeProject({ ...p, built: true });
+    end();
+  }
 }));
 
 // Stop the in-flight run of a project (any tab may call this; all attached tabs see the resulting 'done' event).
@@ -379,6 +390,8 @@ async function boot() {
   if (problem) { console.error('\n  ✗ ' + problem.replace(/\n/g, '\n    ') + '\n'); process.exit(1); }
   const n = backfillIfNeeded(); if (n) console.log(`[boot] token usage log backfilled: ${n} entries`);
   const projects = listProjects();
+  // nothing is running at boot: any project that has been chatted with is past its first build
+  for (const p of projects) if (!p.built && lastChatAt(p.id)) writeProject({ ...readProject(p.id), built: true });
   for (const p of projects) if (p.autoStart !== false) runner.start(p.id).catch(e => console.error(`[boot] ${p.id}:`, e.message));
   // daily demo-data reset (checked every 10 minutes; runs once a day after 04:00 local time)
   setInterval(() => runDailyResets(listProjects(), isBusy).catch(e => console.error('[demo-data]', e.message)), 10 * 60_000).unref();

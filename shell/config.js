@@ -49,6 +49,8 @@ export function getSettings() {
     vision: ['auto', 'on', 'off'].includes(s.vision) ? s.vision : 'auto',
     visionOk: typeof s.visionOk === 'boolean' ? s.visionOk : null, // auto-detected support of the current model
     visionError: s.visionError || '', // provider message that switched screenshots off
+    // build agent reasoning: on = provider default (gateways often think by default), off = switch it off (much faster)
+    agentThinking: ['on', 'off'].includes(s.agentThinking) ? s.agentThinking : 'on',
     // LLM used INSIDE generated projects (env SUPERDEMO_LLM_*). useShell=true -> same as the shell agent.
     projectLlm: {
       useShell: pl.useShell !== false,
