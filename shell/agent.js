@@ -728,7 +728,7 @@ async function runAgentInner(project, userMessage, run, sid, opts = {}) {
       push({ role: 'user', system: true, ts: Date.now(), content: '[系统] 本轮步数已用完，不能再调用工具。请直接向用户简短总结：已完成的改动、没做完的部分（具体到页面/文件，以及是否会影响现在的使用，例如导航指向了还没写完的页面）、建议下一句怎么说让你接着做。' });
       rebuild();
       onEvent({ type: 'thinking', iteration: settings.maxIterations + 1 });
-      const r = await chat({ messages: withImages(id, messages, false), settings, signal, onDelta: d => onEvent({ type: 'delta', ...d }) });
+      const r = await chat({ thinking: false, messages: withImages(id, messages, false), settings, signal, onDelta: d => onEvent({ type: 'delta', ...d }) });
       const u = normalizeUsage(r.usage, r.ms, r.ttft);
       if (u) recordProjectUsage(id, u, sid);
       finalText = String(r.message.content || '').trim();
@@ -778,7 +778,7 @@ function fallbackName(description) {
 export async function generateProjectName(description) {
   const system = `你给软件项目起名。根据需求描述输出一个简短、具体、面向业务的中文项目名：严格不超过 ${MAX_NAME} 个汉字，不含标点、引号、空格，不带"项目/系统/平台/Demo/小助手/管理"等冗余后缀。只输出名字本身。`;
   try {
-    const ask = async msgs => { const r = await chat({ temperature: 0.2, messages: msgs }); const u = normalizeUsage(r.usage); if (u) logUsage({ p: '_naming', i: u.input, o: u.output, c: u.cached }); return cleanName(r.message.content); };
+    const ask = async msgs => { const r = await chat({ thinking: false, temperature: 0.2, messages: msgs }); const u = normalizeUsage(r.usage); if (u) logUsage({ p: '_naming', i: u.input, o: u.output, c: u.cached }); return cleanName(r.message.content); };
     let name = await ask([{ role: 'system', content: system }, { role: 'user', content: String(description).slice(0, 2000) }]);
     if ([...name].length > MAX_NAME) {
       name = await ask([{ role: 'system', content: system }, { role: 'user', content: `把「${name}」压缩到不超过 ${MAX_NAME} 个字，保留核心业务含义，只输出名字。` }]);

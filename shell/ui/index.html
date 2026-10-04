@@ -109,7 +109,7 @@
       <div class="pp-list" data-key="pages"><div class="pp-title">页面 <span class="muted">名称：能做什么</span></div></div>
       <div class="pp-list" data-key="data"><div class="pp-title">数据 <span class="muted">对象：字段（必填加 *）</span></div></div>
       <div class="pp-list" data-key="flows"><div class="pp-title">关键流程</div></div>
-      <div class="pp-title">设计方向 <span class="muted">按行业和使用场景推导，选一个</span></div>
+      <div class="pp-title row between">设计方向 <span class="muted" style="flex:1">按行业和使用场景推导，选一个</span><button id="ppSketch" type="button" class="ghost small" title="每个方向画一张核心页面草图（约 1 分钟），先看样子再选">🎨 画草图对比</button></div>
       <div id="ppDesigns" class="pp-designs"></div>
       <label>示例数据<textarea id="ppSample" rows="2"></textarea></label>
       <div class="pp-list" data-key="highlights"><div class="pp-title">演示亮点</div></div>
@@ -268,6 +268,13 @@
   </header>
   <div id="boardCols" class="board-cols"></div>
 </section>
+
+<dialog id="dlgSketch">
+  <div class="dlg sk-dlg">
+    <div class="row between"><h3>草图 · <span id="skTitle"></span></h3><button id="skClose" class="ghost">关闭</button></div>
+    <iframe id="skFrame" sandbox="" title="设计草图"></iframe>
+  </div>
+</dialog>
 
 <dialog id="dlgReport" class="export-dlg">
   <div class="dlg wide">

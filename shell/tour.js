@@ -54,7 +54,7 @@ export async function generateTour(id) {
     plan?.highlights?.length && `演示亮点：\n${plan.highlights.map(f => '- ' + f).join('\n')}`,
     `页面：\n${pages(id).join('\n') || '（只有首页）'}`,
   ].filter(Boolean).join('\n\n');
-  const r = await chat({ temperature: 0.4, messages: [
+  const r = await chat({ thinking: false, temperature: 0.4, messages: [
     { role: 'system', content: `你为一个 Web Demo 写「访客导览」：第一次打开的人看到一张小卡片，按步骤体验最有价值的功能。只输出 JSON：{"title":"不超过12字","intro":"一句话说明这个 Demo 帮谁解决什么，不超过40字","steps":[{"text":"动作 + 能看到什么，不超过40字，如：在「库存总览」看哪些商品标红缺货","page":"对应页面文件名，如 dashboard.html；首页留空"}]}，3-5 步，按体验顺序，用业务语言，不提技术。` },
     { role: 'user', content: context },
   ] });

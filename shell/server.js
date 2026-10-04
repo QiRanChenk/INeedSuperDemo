@@ -1,12 +1,13 @@
 import express from 'express';
 import path from 'node:path';
 import fs from 'node:fs';
-import { ROOT, getSettings, saveSettings, getProjectLlm, maskKey, PRESETS } from './config.js';
-import { PROJECT_TYPES, SKELETONS, skeletonAvailable, listProjects, createProject, duplicateProject, deleteProject, readProject, writeProject, fileTree, safePath } from './registry.js';
+import { ROOT, SDK_DIR, getSettings, saveSettings, getProjectLlm, maskKey, PRESETS } from './config.js';
+import { PROJECT_TYPES, SKELETONS, skeletonAvailable, listProjects, createProject, duplicateProject, deleteProject, readProject, writeProject, fileTree, safePath, projectDir } from './registry.js';
 import { listFeedback, countNew, updateFeedback, deleteFeedback, feedbackToMessage } from './feedback.js';
 import { demoDataInfo, saveDemoData, restoreDemoData, setDailyReset, runDailyResets } from './demodata.js';
 import { getTour, saveTour, generateTour } from './tour.js';
 import { getReport, makeReport, evidence, VERDICTS } from './report.js';
+import { makeSketch, cleanSketch } from './sketch.js';
 import { getPretest, runPretest, planWalks, continueWalk, pageList } from './personas.js';
 import { makePlan, normalizePlan, planToMessage } from './planner.js';
 import * as runner from './runner.js';
@@ -103,6 +104,11 @@ app.post('/api/projects/name', wrap(async (req, res) => {
   if (!description) return res.status(400).json({ error: '请先填写「你想做什么」' });
   res.json({ name: await generateProjectName(description) });
 }));
+// design sketch of one direction of a plan (static HTML, shown sandboxed; sd.css served from the shell for it)
+app.use('/_sd', express.static(path.join(SDK_DIR, 'ui')));
+app.post('/api/projects/sketch', wrap(async (req, res) => {
+  res.json({ html: await makeSketch(req.body?.plan || {}, Number(req.body?.index) || 0, req.body?.description || '') });
+}));
 app.post('/api/projects', wrap(async (req, res) => {
   const body = { ...(req.body || {}) };
   body.description = String(body.description || '').trim();
@@ -111,8 +117,11 @@ app.post('/api/projects', wrap(async (req, res) => {
   const plan = body.plan ? normalizePlan(body.plan) : null;
   body.name = String(body.name || plan?.name || '').trim() || await generateProjectName(body.description);
   const p = await createProject({ name: body.name, description: body.description, type: body.type, skeleton: plan?.skeleton || body.skeleton, plan: plan || undefined });
+  const sketch = plan && body.sketch ? cleanSketch(body.sketch) : '';
+  if (sketch) fs.writeFileSync(path.join(projectDir(p.id), 'sketch.html'), sketch);
   await runner.start(p.id);
-  res.json({ ...withStatus(p), firstMessage: plan ? planToMessage(plan, body.description) : `请根据以下需求改造这个项目：\n${body.description}` });
+  const sketchNote = sketch ? '\n\n## 已确认的设计草图\n用户看过并选定了核心页面的静态草图，存在项目根目录 sketch.html（不对外提供）。先 read_file 看一遍，核心页面照它的布局、专属元素和视觉做（可以直接拿它的结构和样式改成真实页面：示例数据改为来自接口、按钮接上功能）；草图里画了但方案没要求的入口和细节不要做（导航只保留方案里的页面）。' : '';
+  res.json({ ...withStatus(p), firstMessage: plan ? planToMessage(plan, body.description) + sketchNote : `请根据以下需求改造这个项目：\n${body.description}` });
 }));
 app.get('/api/projects/:id', wrap((req, res) => {
   const p = readProject(req.params.id);

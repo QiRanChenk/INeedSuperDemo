@@ -45,7 +45,7 @@ function recentDesigns(n = 6) {
 export async function makePlan(description) {
   const recent = recentDesigns();
   const user = String(description).slice(0, 4000) + (recent.length ? `\n\n（最近其他项目用过的设计：${recent.join('；')}。若别的方向同样合适，优先换一种，避免所有 Demo 长得一样；行业确实最适合同一种时可以重复。）` : '');
-  const r = await chat({ temperature: 0.6, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: user }] });
+  const r = await chat({ thinking: false, temperature: 0.6, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: user }] });
   const u = normalizeUsage(r.usage);
   if (u) logUsage({ p: '_planning', i: u.input, o: u.output, c: u.cached });
   return normalizePlan(parseJson(r.message.content || ''));

@@ -13,7 +13,12 @@ export class StoppedError extends Error { constructor() { super('已停止'); th
  * `signal` (optional AbortSignal) lets the caller stop the call: while streaming, the partial message collected so far is
  * returned with aborted=true; before the first byte a StoppedError is thrown.
  */
-export async function chat({ messages, tools, temperature, settings, onDelta, signal }) {
+// One-shot JSON/HTML tasks (plan, report, tour, pre-test, sketch) pass thinking:false: gateways that think by default are
+// several times slower and may spend the answer budget on reasoning. If the provider rejects the switch, drop it for good.
+const THINKING_OFF = { enable_thinking: false, thinking: { type: 'disabled' } };
+let thinkingParamsOk = true;
+
+export async function chat({ messages, tools, temperature, settings, onDelta, signal, thinking }) {
   const s = settings || getSettings();
   if (!s.baseUrl || !s.model) throw new Error('LLM 未配置：请先在设置中填写 Base URL / Model / API Key');
   if (signal?.aborted) throw new StoppedError();
@@ -22,6 +27,8 @@ export async function chat({ messages, tools, temperature, settings, onDelta, si
   const body = { model: s.model, messages, temperature: temperature ?? s.temperature, stream };
   if (stream) body.stream_options = { include_usage: true };
   if (tools?.length) { body.tools = tools; body.tool_choice = 'auto'; }
+  const switchOff = thinking === false && thinkingParamsOk;
+  if (switchOff) Object.assign(body, THINKING_OFF);
 
   const t0 = Date.now();
   const ctrl = new AbortController();
@@ -36,7 +43,15 @@ export async function chat({ messages, tools, temperature, settings, onDelta, si
       body: JSON.stringify(body),
       signal: ctrl.signal,
     });
-    if (!res.ok) throw new Error(`LLM HTTP ${res.status}: ${(await res.text()).slice(0, 500)}`);
+    if (!res.ok) {
+      const text = await res.text();
+      if (switchOff && res.status === 400 && /thinking|unrecognized|unknown|extra|not permitted|additional/i.test(text)) {
+        thinkingParamsOk = false;
+        clearTimeout(timer); signal?.removeEventListener('abort', onStop);
+        return chat({ messages, tools, temperature, settings, onDelta, signal });
+      }
+      throw new Error(`LLM HTTP ${res.status}: ${text.slice(0, 500)}`);
+    }
     // some gateways ignore stream=true and answer with plain JSON
     if (!stream || !(res.headers.get('content-type') || '').includes('text/event-stream')) {
       const data = parseJson(await res.text());
@@ -116,6 +131,6 @@ async function readStream(bodyStream, touch, onDelta, t0, signal) {
 
 export async function testConnection(settings) {
   const t0 = Date.now();
-  const { message } = await chat({ settings, messages: [{ role: 'user', content: '回复 OK' }], temperature: 0 });
+  const { message } = await chat({ thinking: false, settings, messages: [{ role: 'user', content: '回复 OK' }], temperature: 0 });
   return { ok: true, ms: Date.now() - t0, reply: String(message.content || '').slice(0, 50) };
 }

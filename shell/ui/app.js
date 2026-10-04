@@ -515,6 +515,7 @@ const splitOnce = s => { const m = s.match(/^(.*?)[：:](.*)$/); return m ? [m[1
 
 function showPlan(plan) {
   lastPlan = plan;
+  $('#ppSketch').textContent = '🎨 画草图对比';
   $('#ppName').value = plan.name || '';
   const sel = $('#ppSkeleton'); sel.innerHTML = '';
   for (const k of skeletons) { const o = document.createElement('option'); o.value = k.id; o.textContent = k.label; o.title = k.fit; o.disabled = !k.available; sel.appendChild(o); }
@@ -543,8 +544,46 @@ function renderDesigns(list, chosen) {
     el.querySelector('.tags').innerHTML = [LOOK_NAMES[d.look], ...d.layout.split('+').map(x => LAYOUT_NAMES[x]), d.color, ...d.signature].filter(Boolean).map(t => `<span>${esc(t)}</span>`).join('');
     el.onclick = () => { planDesign = i; box.querySelectorAll('.pp-design').forEach((x, j) => x.classList.toggle('on', j === i)); };
     box.appendChild(el);
+    if (lastPlan?.sketches?.[i]) showSketchThumb(el, lastPlan.sketches[i]);
   });
+  $('#ppSketch').hidden = !list.length;
 }
+
+// ---------- design sketches: a static mock of the core screen per direction, to compare before building ----------
+let sdCss = null;
+async function sketchDoc(html) {
+  sdCss ??= await fetch('/_sd/sd.css').then(r => r.text()).catch(() => '');
+  return html.replace(/<link[^>]*_sd\/sd\.css[^>]*>/i, () => `<style>${sdCss}</style>`);
+}
+async function showSketchThumb(card, html) {
+  card.querySelector('.pp-sk')?.remove();
+  const wrap = document.createElement('div'); wrap.className = 'pp-sk'; wrap.title = '点击放大';
+  const f = document.createElement('iframe'); f.setAttribute('sandbox', ''); f.tabIndex = -1; f.srcdoc = await sketchDoc(html);
+  wrap.appendChild(f); card.insertBefore(wrap, card.firstChild);
+  const fit = () => { f.style.transform = `scale(${wrap.clientWidth / 1280})`; };
+  fit(); new ResizeObserver(fit).observe(wrap);
+  wrap.onclick = async e => { e.stopPropagation(); card.click(); $('#skFrame').srcdoc = await sketchDoc(html); $('#skTitle').textContent = card.querySelector('b').textContent; $('#dlgSketch').showModal(); };
+}
+$('#skClose').onclick = () => $('#dlgSketch').close();
+$('#ppSketch').onclick = async () => {
+  const plan = lastPlan; if (!plan?.designs?.length) return;
+  const btn = $('#ppSketch'); btn.disabled = true;
+  const cards = [...$('#ppDesigns').children], current = readPlan();
+  plan.sketches ||= [];
+  $('#ppStatus').textContent = `正在为 ${cards.length} 个方向画草图（约 1 分钟）…`;
+  let fail = 0;
+  await Promise.all(cards.map(async (card, i) => {
+    card.querySelector('.pp-sk')?.remove();
+    card.insertAdjacentHTML('afterbegin', '<div class="pp-sk loading">绘制中…</div>');
+    try {
+      const { html } = await api('/api/projects/sketch', { method: 'POST', body: { plan: { ...current, design: i }, index: i, description: planDesc } });
+      if (lastPlan !== plan) return;
+      plan.sketches[i] = html; await showSketchThumb(card, html);
+    } catch (e) { fail++; const l = card.querySelector('.pp-sk.loading'); if (l) l.textContent = '✗ ' + e.message; }
+  }));
+  if (lastPlan === plan) $('#ppStatus').textContent = fail ? `${fail} 张草图失败，可以再点一次` : '草图好了：点开放大对比，选中的那张会交给 AI 照着做';
+  btn.disabled = false; btn.textContent = '🎨 重画草图';
+};
 function readPlan() {
   return {
     name: $('#ppName').value.trim(), skeleton: $('#ppSkeleton').value, summary: $('#ppSummary').value.trim(),
@@ -580,7 +619,7 @@ async function createAndStart(body, statusEl, btn) {
   } catch (e) { statusEl.textContent = '✗ ' + e.message; }
   finally { btn.disabled = false; }
 }
-$('#ppOk').onclick = () => createAndStart({ description: planDesc, type: 'web', name: $('#ppName').value.trim(), plan: readPlan() }, $('#ppStatus'), $('#ppOk'));
+$('#ppOk').onclick = () => createAndStart({ description: planDesc, type: 'web', name: $('#ppName').value.trim(), plan: readPlan(), sketch: lastPlan?.sketches?.[planDesign] || '' }, $('#ppStatus'), $('#ppOk'));
 $('#npSkip').onclick = () => {
   const description = $('#npDesc').value.trim();
   if (!description) { $('#npStatus').textContent = '请先写一句你想做什么'; $('#npDesc').focus(); return; }
