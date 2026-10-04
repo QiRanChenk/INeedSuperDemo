@@ -13,6 +13,7 @@ const SYSTEM = `你是资深的产品顾问，帮业务人员把一句话想法�
 {
   "name": "项目名，具体、面向业务，不超过 10 个汉字，不带"系统/平台/Demo"后缀",
   "hypothesis": "这个 Demo 要验证的核心假设，一句话，如：店长愿意每天花 1 分钟录库存来换取缺货预警",
+  "criteria": "怎样算这个想法成立：发给目标用户后可观察的标准，一句话，如：8 位试用的店长里至少 5 人动手录一次库存、至少 3 人留下联系方式",
   "signals": ["问试用者的 2-3 个验证问题，用来判断假设是否成立，口语化，如：你现在怎么知道哪些货快卖完了？这个提醒能替代你现在的做法吗？"],
   "skeleton": "起步骨架，从 ${Object.keys(SKELETONS).join(' / ')} 中选最接近的：${Object.entries(SKELETONS).map(([k, v]) => `${k}=${v.label}（${v.fit}）`).join('；')}",
   "summary": "一句话说明这个 Demo 解决谁的什么问题",
@@ -74,6 +75,7 @@ export function normalizePlan(p = {}) {
     outOfScope: strList(p.outOfScope, 6),
     notes: String(p.notes || '').trim(),
     hypothesis: String(p.hypothesis || '').trim().slice(0, 200),
+    criteria: String(p.criteria || '').trim().slice(0, 200),
     signals: strList(p.signals, 4),
     designs: (Array.isArray(p.designs) ? p.designs : []).slice(0, 3).map(d => ({
       name: String(d?.name || '').trim().slice(0, 20), why: String(d?.why || '').trim().slice(0, 200),
@@ -105,7 +107,7 @@ export function planToMessage(plan, description) {
     `用户原话：${description}`,
     '',
     sec('目标', [p.summary].filter(Boolean)),
-    sec('要验证的假设', [p.hypothesis].filter(Boolean)),
+    sec('要验证的假设', [p.hypothesis, p.criteria && `成立标准：${p.criteria}（标准里要求访客做的动作，Demo 里必须能顺利做到）`].filter(Boolean)),
     sec('使用者', p.users.map(x => `- ${x}`)),
     sec('页面', p.pages.map(x => `- ${x.name}：${x.purpose}`)),
     sec('数据', p.data.map(d => `- ${d.name}：${d.fields.join('、')}`)),

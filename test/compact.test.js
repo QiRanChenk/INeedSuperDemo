@@ -62,3 +62,10 @@ test('screenshots: only the latest two in kept turns carry an image marker; the 
   assert.deepEqual(messages.filter(m => m._image).map(m => m._image), ['s1.jpg', 's2.jpg']);
   assert.ok(messages.every(m => !('image' in m)));
 });
+
+test('turnLabel gives UI-sent instructions a short human label', async () => {
+  const { turnLabel } = await import('../shell/sessions.js');
+  assert.equal(turnLabel('请按下面已经和用户确认的方案，把这个项目改造成…'), '按方案制作第一版');
+  assert.equal(turnLabel('以下是别人试用这个 Demo 时留下的反馈。请逐条判断'), '按访客反馈修改');
+  assert.equal(turnLabel('把按钮改大一点\n第二行'), '把按钮改大一点');
+});

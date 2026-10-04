@@ -27,7 +27,7 @@
 <section id="chat">
   <header>
     <div>
-      <div id="pName" class="pname">选择或新建一个项目</div>
+      <div class="row" style="gap:6px"><button id="btnBoard" class="ghost small" title="回到想法看板">← 看板</button><div id="pName" class="pname">选择或新建一个项目</div></div>
       <div id="pMeta" class="muted small"></div>
     </div>
     <div class="actions">
@@ -102,27 +102,34 @@
       <h3>新想法</h3>
       <label><span class="lbl">你想做什么？<span class="req">*</span><span class="muted">一两句话就行，AI 会先出一份方案给你确认</span></span>
         <textarea id="npDesc" rows="4" placeholder="例如：门店库存预警工具，店长录入商品和库存，低于阈值标红，AI 给补货建议"></textarea></label>
-      <label>项目类型<select id="npType"></select></label>
+      <div id="npExamples" class="np-examples"></div>
+      <label class="dev-only">项目类型<select id="npType"></select></label>
       <div id="npStatus" class="small muted"></div>
       <div class="row end"><button type="button" id="npCancel" class="ghost">取消</button><button type="button" id="npSkip" class="ghost" title="不出方案，直接按描述开始制作">跳过方案直接做</button><button type="button" id="npAuto" class="ghost" title="全自动：出方案 → 按推荐方向画草图并制作 → AI 模拟试用 → 按意见改一版（约 12–18 分钟，不用盯着；保持这个页面打开）">⚡ 一键到底</button><button type="button" id="npPlan" class="primary">生成方案</button></div>
+      <div class="muted small np-hint">「生成方案」约 10 秒，先看方案和草图再决定；「⚡ 一键到底」全自动做完（方案 → 草图 → 制作 → 模拟用户挑毛病 → 修改），约 12–18 分钟，期间保持页面打开</div>
     </section>
     <section id="npStep2" class="dlg-step" hidden>
-      <div class="row between"><h3>确认方案</h3><span class="muted small">按需修改，确认后 AI 开始制作</span></div>
-      <div class="row"><label class="inline">项目名称<input id="ppName" maxlength="20"></label><label class="inline">起步骨架<select id="ppSkeleton"></select></label></div>
+      <div class="row between"><h3>确认方案</h3><span class="muted small" style="flex:1;margin-left:10px">按需修改，确认后 AI 开始制作（关掉也会存为草稿）</span><button type="button" id="ppClose" class="ghost" title="关闭（方案会存为草稿，下次打开可以恢复）">✕</button></div>
+      <label>项目名称<input id="ppName" maxlength="20"></label>
       <label>目标<textarea id="ppSummary" rows="2"></textarea></label>
       <label>要验证的假设<span class="muted small">这个 Demo 想证明什么</span><input id="ppHyp"></label>
+      <label>怎样算成立<span class="muted small">发给目标用户后，看到什么结果就说明想法可行</span><input id="ppCriteria"></label>
       <div class="pp-list" data-key="signals"><div class="pp-title">验证问题 <span class="muted">分享后问试用者，用来判断想法是否成立</span></div></div>
       <div class="pp-list" data-key="pages"><div class="pp-title">页面 <span class="muted">名称：能做什么</span></div></div>
-      <div class="pp-list" data-key="data"><div class="pp-title">数据 <span class="muted">对象：字段（必填加 *）</span></div></div>
       <div class="pp-list" data-key="flows"><div class="pp-title">关键流程</div></div>
       <div class="pp-title row between">设计方向 <span class="muted" style="flex:1">按行业和使用场景推导，选一个</span><button id="ppSketch" type="button" class="ghost small" title="每个方向画一张核心页面草图（约 1 分钟），先看样子再选">🎨 画草图对比</button></div>
       <div id="ppDesigns" class="pp-designs"></div>
-      <label>示例数据<textarea id="ppSample" rows="2"></textarea></label>
       <div class="pp-list" data-key="highlights"><div class="pp-title">演示亮点</div></div>
       <div class="pp-list" data-key="outOfScope"><div class="pp-title">这一版先不做</div></div>
       <label>补充说明<span class="muted small">其他要求，如配色、必须有的字段、给谁演示</span><textarea id="ppNotes" rows="2"></textarea></label>
+      <details class="pp-adv"><summary>更多细节（AI 已经填好，一般不用改）：示例数据、数据结构、起步骨架</summary>
+        <label>示例数据<span class="muted small">Demo 里预置什么样的数据，让它看起来真实</span><textarea id="ppSample" rows="2"></textarea></label>
+        <div class="pp-list" data-key="data"><div class="pp-title">要记录的信息 <span class="muted">对象：字段（必填加 *）</span></div></div>
+        <label>起步骨架<span class="muted small">AI 从哪个模板开始改</span><select id="ppSkeleton"></select></label>
+      </details>
       <div id="ppStatus" class="small muted"></div>
       <div class="row end"><button type="button" id="ppBack" class="ghost">← 修改需求</button><button type="button" id="ppRegen" class="ghost">重新生成</button><button type="button" id="ppOk" class="primary">确认方案，开始制作</button></div>
+      <div class="muted small" style="text-align:right">制作约 8–10 分钟，期间预览区先显示选中的草图</div>
     </section>
   </div>
 </dialog>
@@ -134,11 +141,13 @@
     <label>预设<select id="stPreset"></select></label>
     <label>Base URL<input id="stBase" placeholder="https://api.deepseek.com"></label>
     <label>Model<input id="stModel" placeholder="deepseek-chat"></label>
+    <div class="muted small">建议选能关闭「深度思考」的模型（DeepSeek、Qwen 系列）。实测 deepseek-v4-pro 成品最好、deepseek-v4.1-flash 最快；GLM 只能开着思考，出方案和制作会慢 2–3 倍，也画不了草图。</div>
     <label>API Key<input id="stKey" type="password" placeholder="sk-…（留空保持不变）" autocomplete="off"></label>
     <div class="row"><label class="inline">Temperature<input id="stTemp" type="number" step="0.1" min="0" max="2"></label>
       <label class="inline">最大迭代<input id="stIter" type="number" min="1" max="200"></label>
       <label class="inline">上下文窗口 (tokens)<input id="stCtx" type="number" min="1000" step="1000" placeholder="1000000"></label></div>
     <label class="check"><input type="checkbox" id="stStream" checked> 流式输出（逐字显示；个别网关不支持 SSE 时可关闭）</label>
+    <label class="check"><input type="checkbox" id="stDev"> 显示技术细节（端口、Token 用量、启停按钮、运行日志、文件）</label>
     <label>页面截图给模型<select id="stVision"><option value="auto">自动（先发送，模型不支持时自动关闭）</option><option value="on">总是发送</option><option value="off">不发送（只用页面结构文本）</option></select></label>
     <div id="stVisionState" class="small muted"></div>
     <div id="stResult" class="small muted"></div>
@@ -243,7 +252,7 @@
 <dialog id="dlgFeedback" class="export-dlg">
   <div class="dlg wide">
     <div class="row between"><h3>访客反馈 · <span id="fbName"></span></h3><button id="fbClose" class="ghost">关闭</button></div>
-    <p class="muted small" style="margin:0">别人通过分享链接点「💬 提意见」留下的反馈。勾选后可一键交给 AI 处理。</p>
+    <p class="muted small" style="margin:0">别人通过分享链接点「💬 说说看法」留下的反馈。勾选后可一键交给 AI 处理。</p>
     <div class="row wrap"><label class="check"><input type="checkbox" id="fbAll"> 全选未处理</label><span class="sd-spacer" style="flex:1"></span>
       <button id="fbSend" class="primary">交给 AI 处理所选</button><button id="fbDone" class="ghost">标为已处理</button><button id="fbDel" class="ghost danger">删除</button></div>
     <ul id="fbList" class="vslist"></ul>
@@ -270,14 +279,15 @@
 <section id="board">
   <header class="board-head">
     <div><h2>想法看板</h2><div class="muted small">做出 Demo → 发给目标用户试 → 收集表态 → 得出结论。一个想法值不值得做，用证据说话。</div></div>
-    <div class="actions"><button id="bdSettings" class="ghost" title="模型设置">⚙</button><button id="bdNew" class="primary">＋ 新想法</button></div>
+    <div class="actions"><button id="bdSettings" class="ghost" title="模型设置">⚙ 模型设置</button><button id="bdNew" class="primary">＋ 新想法</button></div>
   </header>
+  <div id="boardIntro" class="board-intro" hidden></div>
   <div id="boardCols" class="board-cols"></div>
 </section>
 
 <dialog id="dlgSketch">
   <div class="dlg sk-dlg">
-    <div class="row between"><h3>草图 · <span id="skTitle"></span></h3><button id="skClose" class="ghost">关闭</button></div>
+    <div class="row between"><h3>草图 · <span id="skTitle"></span></h3><div class="row"><button id="skUse" class="primary">✓ 就用这个方向</button><button id="skClose" class="ghost">关闭</button></div></div>
     <iframe id="skFrame" sandbox="" title="设计草图"></iframe>
   </div>
 </dialog>

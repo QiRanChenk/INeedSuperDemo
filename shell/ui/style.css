@@ -226,7 +226,7 @@ body.view-board #chat, body.view-board #preview { display: none !important; } bo
 .verdict.reject { background: rgba(229,83,75,.16); color: #ff7b72; } .verdict.unclear { background: rgba(139,147,167,.16); color: var(--muted); }
 .rxbar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--bg); flex: 1; min-width: 60px; } .rxbar i { display: block; }
 /* report dialog */
-.rp-hyp { font-size: 15px; padding: 10px 12px; border-left: 3px solid var(--brand); background: var(--bg); border-radius: 0 8px 8px 0; }
+.rp-hyp { white-space: pre-line; font-size: 15px; padding: 10px 12px; border-left: 3px solid var(--brand); background: var(--bg); border-radius: 0 8px 8px 0; }
 .rp-stats { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; } .rp-stats div { background: var(--bg); border-radius: 10px; padding: 10px 12px; } .rp-stats b { display: block; font-size: 20px; }
 .rp-verdict { border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
 .rp-verdict h4 { margin: 0; display: flex; gap: 8px; align-items: center; font-size: 16px; } .rp-verdict ul { margin: 0; padding-left: 18px; } .rp-verdict .lbl { font-size: 12px; color: var(--muted); }
@@ -261,3 +261,36 @@ body.view-board #chat, body.view-board #preview { display: none !important; } bo
 .rp-groups table { width: 100%; border-collapse: collapse; font-size: 13px; } .rp-groups th, .rp-groups td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); } .rp-groups th { color: var(--muted); font-weight: 500; }
 .rp-groups .lbl { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 .rp-round { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 10px; background: rgba(91,141,239,.08); border: 1px solid rgba(91,141,239,.25); }
+.board-intro { display: flex; flex-direction: column; gap: 10px; padding: 0 0 6px; }
+.bi-steps { display: flex; gap: 8px; flex-wrap: wrap; } .bi-steps span { background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: 13px; } .bi-steps b { color: var(--brand); margin-right: 4px; }
+.bi-ex { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; }
+.bi-ex .ex { text-align: left; display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; color: var(--ink); cursor: pointer; }
+.bi-ex .ex:hover { border-color: var(--brand); } .bi-ex .i { grid-row: span 2; font-size: 22px; } .bi-ex .tag { font-size: 12px; color: var(--muted); } .bi-ex .t { font-size: 13px; line-height: 1.45; }
+.np-examples { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: -4px; }
+.np-examples .chip { background: var(--bg); border: 1px solid var(--line); color: var(--ink); border-radius: 999px; padding: 2px 10px; font-size: 12px; cursor: pointer; } .np-examples .chip:hover { border-color: var(--brand); }
+/* business users don't need ports, tokens, start/stop, logs: shown only with "显示技术细节" */
+body:not(.dev) #tokenStats, body:not(.dev) #usage, body:not(.dev) #btnToggle, body:not(.dev) #btnRestart,
+body:not(.dev) #btnLogs, body:not(.dev) #btnFiles, body:not(.dev) .dev-only, body:not(.dev) .plist .port { display: none !important; }
+.msg.assistant:not(.live) { white-space: normal; }
+.msg.assistant p { margin: 0 0 6px; } .msg.assistant .mh { font-weight: 700; margin: 10px 0 4px; } .msg.assistant .mh1, .msg.assistant .mh2 { font-size: 15px; }
+.msg.assistant ul, .msg.assistant ol { margin: 0 0 6px; padding-left: 20px; } .msg.assistant li { margin: 2px 0; }
+.msg.assistant code { background: rgba(127,127,127,.18); border-radius: 4px; padding: 0 4px; font-size: .92em; }
+.msg.assistant pre { background: var(--bg); border-radius: 8px; padding: 8px 10px; overflow: auto; margin: 0 0 6px; } .msg.assistant pre code { background: none; padding: 0; }
+.msg.assistant blockquote { margin: 0 0 6px; padding-left: 10px; border-left: 3px solid var(--line); color: var(--muted); }
+.pp-sk .zoom { position: absolute; right: 6px; bottom: 6px; background: rgba(0,0,0,.6); color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 999px; pointer-events: none; }
+/* checkbox labels never break into a vertical column of characters */
+.dlg label.check { white-space: nowrap; flex: none; }
+/* share links on phones: URL on its own line (truncated), buttons below */
+@media (max-width: 760px) {
+  #shList li { flex-wrap: wrap; } #shList .vmain { flex-basis: 100%; }
+  #shList .surl { word-break: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rp-stats { grid-template-columns: repeat(3, 1fr) !important; } .rp-stats span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+}
+/* dialogs: dark scrollbars to match the theme */
+dialog, .dlg, #messages { scrollbar-color: #3a4152 transparent; }
+.icard .sim { color: #a78bfa; border: 1px dashed rgba(167,139,250,.5); border-radius: 6px; padding: 0 6px; }
+.icard .shot.none { font-size: 12px; color: var(--muted); }
+.tag-sus { background: rgba(229,83,75,.16); color: #ff7b72; border-radius: 6px; padding: 0 6px; font-size: 12px; }
+.warn-box { display: block; background: rgba(210,153,34,.15); color: #e3b341; border: 1px solid rgba(210,153,34,.4); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+.pp-adv { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; } .pp-adv summary { cursor: pointer; color: var(--muted); font-size: 13px; } .pp-adv[open] { display: flex; flex-direction: column; gap: 10px; }
+@media (max-width: 760px) { #chat > header .actions { flex-wrap: wrap; row-gap: 6px; } }

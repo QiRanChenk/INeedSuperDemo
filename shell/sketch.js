@@ -61,6 +61,9 @@ ${kit()}` },
   try { r = await call(); } catch (e) { if (!/inappropriate|sensitive|安全|审核/i.test(e.message)) throw e; r = await call(); }
   const usage = r => { const u = normalizeUsage(r.usage); if (u) logUsage({ p: '_planning', i: u.input, o: u.output, c: u.cached }); };
   usage(r);
+  // models that can't switch reasoning off (e.g. glm-5.3) spend the whole budget thinking (even 32k tokens / 9 minutes
+  // didn't produce a sketch in testing): say so instead of retrying
+  if (!/<body/i.test(String(r.message.content || '')) && r.message.reasoning_content) throw new Error('当前模型无法关闭深度思考，画草图会把输出额度全用在思考上。可以跳过草图直接确认方案，或在模型设置里换成 deepseek / qwen 系列再画');
   // gateways cap one answer (~8k tokens here): continue from where it stopped, up to twice
   let out = String(r.message.content || '').replace(/\s*```\s*$/, '');
   for (let k = 0; k < 2 && /<body/i.test(out) && !/<\/html\s*>/i.test(out); k++) {

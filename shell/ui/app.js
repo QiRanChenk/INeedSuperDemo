@@ -1,5 +1,8 @@
 const $ = s => document.querySelector(s);
 let projects = [], current = null, settings = null;
+// technical details (ports, tokens, start/stop, logs) are for developers; off by default
+const setDev = on => { document.body.classList.toggle('dev', on); try { localStorage.setItem('sdDev', on ? '1' : ''); } catch {} };
+setDev((() => { try { return localStorage.getItem('sdDev') === '1'; } catch { return false; } })());
 let currentSession = null;   // active session id of the current project
 let sessions = [];
 const viewKey = () => current ? `${current.id}:${currentSession}` : '';
@@ -23,7 +26,7 @@ async function loadProjects() {
   for (const p of projects) {
     const li = document.createElement('li');
     li.className = p.id === current?.id ? 'active' : '';
-    li.innerHTML = `<span class="dot ${p.status}"></span><span class="n">${esc(p.name)}</span>${isBusy(p) ? '<span class="thinking small">⋯</span>' : ''}<span class="muted small">:${p.port}</span>`;
+    li.innerHTML = `<span class="dot ${p.status}"></span><span class="n">${esc(p.name)}</span>${isBusy(p) ? '<span class="thinking small">⋯</span>' : ''}<span class="muted small port">:${p.port}</span>`;
     li.onclick = () => select(p.id);
     ul.appendChild(li);
     // a turn finished on the server that this tab was not streaming (e.g. page reload / other tab): refresh view
@@ -38,9 +41,10 @@ async function loadProjects() {
 
 async function select(id) {
   document.body.classList.remove('view-board');
-  if (isPhone()) setTab('chat'); // picking a project on a phone goes straight to its conversation
-  if (current?.id === id) return;
+  if (location.hash !== '#/p/' + id) location.hash = '/p/' + id; // own address: bookmarkable, browser back returns to the board
+  if (current?.id === id) { if (isPhone()) setTab('chat'); return; }
   current = projects.find(p => p.id === id) || null;
+  if (isPhone() && current) setTab('chat'); // picking a project on a phone goes straight to its conversation
   await loadProjects();
   if (!current) return;
   const url = `/p/${current.id}/`;
@@ -159,7 +163,9 @@ function renderHeader() {
   $('#queueBtn').hidden = !(busy && typed && !isStopping);
   $('#pName').textContent = current ? current.name : '选择或新建一个项目';
   $('#mBusy').hidden = !busy;
-  $('#pMeta').textContent = current ? `${current.typeLabel} · ${current.status} · 端口 ${current.port} · id ${current.id}` : '';
+  const STATUS_CN = { running: '运行中', starting: '启动中', stopped: '已停止', crashed: '出错了，正在重试' };
+  $('#pMeta').textContent = !current ? '' : document.body.classList.contains('dev') ? `${current.typeLabel} · ${current.status} · 端口 ${current.port} · id ${current.id}`
+    : [STATUS_CN[current.status] || current.status, isBusy(current) ? 'AI 正在处理' : ''].filter(Boolean).join(' · ');
 }
 
 /** Full replay of the persisted history, including the thinking process (tool calls, results, restarts, reasoning). */
@@ -195,7 +201,33 @@ function append(pid, el, force = false) {
   if (follow) box.scrollTop = box.scrollHeight;
   return el;
 }
-function addMsg(pid, role, text) { const d = document.createElement('div'); d.className = 'msg ' + role; d.textContent = text; return append(pid, d, role === 'user'); }
+function addMsg(pid, role, text) { const d = document.createElement('div'); d.className = 'msg ' + role; if (role === 'assistant' && text) d.innerHTML = md(text); else d.textContent = text; return append(pid, d, role === 'user'); }
+
+/** Small, safe Markdown for the assistant's answers: headings, bold, inline code, code blocks, lists, quotes, http links. */
+function md(src) {
+  const inline = t => esc(t)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (m, t, u) => `<a href="${u}" target="_blank" rel="noopener">${t}</a>`);
+  const out = []; let list = null, code = null;
+  const close = () => { if (list) { out.push(`</${list}>`); list = null; } };
+  for (const line of String(src).split('\n')) {
+    if (code !== null) { if (/^```/.test(line)) { out.push(`<pre><code>${esc(code)}</code></pre>`); code = null; } else code += (code ? '\n' : '') + line; continue; }
+    if (/^```/.test(line)) { close(); code = ''; continue; }
+    let m;
+    if ((m = line.match(/^(#{1,4})\s+(.*)/))) { close(); out.push(`<div class="mh mh${m[1].length}">${inline(m[2])}</div>`); continue; }
+    if ((m = line.match(/^\s*[-*]\s+(.*)/)) || (m = line.match(/^\s*\d+[.)]\s+(.*)/))) {
+      const t = /^\s*\d/.test(line) ? 'ol' : 'ul';
+      if (list !== t) { close(); out.push(`<${t}>`); list = t; }
+      out.push(`<li>${inline(m[1])}</li>`); continue;
+    }
+    close();
+    if ((m = line.match(/^>\s?(.*)/))) { out.push(`<blockquote>${inline(m[1])}</blockquote>`); continue; }
+    out.push(line.trim() ? `<p>${inline(line)}</p>` : '');
+  }
+  close(); if (code !== null) out.push(`<pre><code>${esc(code)}</code></pre>`);
+  return out.join('');
+}
 function addSys(pid, text) { return addMsg(pid, 'sys', text); }
 function addInterjection(pid, text) { const d = addMsg(pid, 'user', text); d.classList.add('interjection'); d.title = '插话（在 AI 处理过程中补充）'; return d; }
 function addTool(pid, name, args) {
@@ -251,7 +283,7 @@ function onDelta(pid, ev) {
 }
 function finishText(pid, content) {
   const l = live.get(pid);
-  if (l?.msg) { l.msg.textContent = content; l.msg.classList.remove('live'); l.msg = null; }
+  if (l?.msg) { l.msg.innerHTML = md(content); l.msg.classList.remove('live'); l.msg = null; }
   else if (content) addMsg(pid, 'assistant', content);
 }
 function finishReasoning(pid, content) {
@@ -459,9 +491,10 @@ $('#stpTest').onclick = async () => {
 function toggleSettings(open) {
   const dlg = $('#settingsPanel');
   const show = open ?? !dlg.open;
-  if (show) { $('#stResult').textContent = ''; $('#stpResult').textContent = ''; if (!dlg.open) dlg.showModal(); }
+  if (show) { $('#stResult').textContent = ''; $('#stpResult').textContent = ''; $('#stDev').checked = document.body.classList.contains('dev'); if (!dlg.open) dlg.showModal(); }
   else if (dlg.open) dlg.close();
 }
+$('#stDev').onchange = e => { setDev(e.target.checked); renderHeader(); };
 async function saveSettings() {
   const body = { baseUrl: $('#stBase').value, model: $('#stModel').value, temperature: $('#stTemp').value, maxIterations: $('#stIter').value, contextWindow: $('#stCtx').value, stream: $('#stStream').checked, vision: $('#stVision').value, projectLlm: collectProjectLlm() };
   if ($('#stKey').value) body.apiKey = $('#stKey').value;
@@ -484,14 +517,19 @@ $('#stClose').onclick = () => toggleSettings(false);
 // ---------- new project: requirement -> plan (editable) -> create + first message ----------
 let planDesc = '', skeletons = [], lastPlan = null;
 const npStep = n => { $('#npStep1').hidden = n !== 1; $('#npStep2').hidden = n !== 2; };
-$('#newProject').onclick = async () => {
+async function openNewIdea(prefill = '') {
+  // nothing works without a model: send a first-time user to the settings instead of a dialog that will fail
+  if (settings && !(settings.hasKey && settings.baseUrl && settings.model)) { toggleSettings(true); alert('先配置 AI 模型：填写 Base URL、Model 和 API Key（在左下角 ⚙ 也能打开），保存后再来写想法。'); return; }
   const [types, sks] = await Promise.all([api('/api/project-types'), api('/api/skeletons')]);
   skeletons = sks;
   const sel = $('#npType'); sel.innerHTML = '';
   for (const t of types) { const o = document.createElement('option'); o.value = t.id; o.textContent = t.label; o.disabled = !t.available; sel.appendChild(o); }
-  $('#npDesc').value = ''; $('#npStatus').textContent = '';
+  $('#npDesc').value = prefill; $('#npStatus').textContent = prefill ? '可以直接改成你自己的想法。点「生成方案」先看方案，或「⚡ 一键到底」全自动做完' : '';
+  renderExampleChips(); planCreated = false;
   npStep(1); $('#dlgNew').showModal(); $('#npDesc').focus();
-};
+  if (!prefill) offerDraft();
+}
+$('#newProject').onclick = () => openNewIdea();
 $('#npCancel').onclick = () => $('#dlgNew').close();
 $('#npType').onchange = () => { const web = $('#npType').value === 'web'; $('#npPlan').hidden = !web; $('#npSkip').textContent = web ? '跳过方案直接做' : '创建并开始'; };
 
@@ -525,10 +563,27 @@ function showPlan(plan) {
   ppList('pages', plan.pages.map(p => p.purpose ? `${p.name}：${p.purpose}` : p.name));
   ppList('data', plan.data.map(d => `${d.name}：${d.fields.join('、')}`));
   ppList('flows', plan.flows); ppList('highlights', plan.highlights); ppList('outOfScope', plan.outOfScope); ppList('signals', plan.signals || []);
-  $('#ppHyp').value = plan.hypothesis || '';
+  $('#ppHyp').value = plan.hypothesis || ''; $('#ppCriteria').value = plan.criteria || '';
   $('#ppSample').value = plan.sampleData || ''; $('#ppNotes').value = ''; $('#ppStatus').textContent = '';
   renderDesigns(plan.designs || [], plan.design || 0);
   npStep(2);
+  $('#dlgNew').scrollTop = 0; $('#npStep2').scrollIntoView?.({ block: 'start' });
+}
+
+// a generated plan (and its sketches) took a minute and some money: closing the dialog keeps it as a draft
+const DRAFT_KEY = 'sdPlanDraft';
+let planCreated = false;
+$('#dlgNew').addEventListener('close', () => {
+  if (planCreated || $('#npStep2').hidden || !lastPlan) return;
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ ts: Date.now(), desc: planDesc, plan: { ...readPlan(), sketches: lastPlan.sketches || [] } })); } catch {}
+});
+function planDraft() { try { const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); return d && Date.now() - d.ts < 7 * 86400e3 ? d : null; } catch { return null; } }
+function offerDraft() {
+  const d = planDraft(); if (!d) return;
+  const st = $('#npStatus'); st.innerHTML = `有一份上次没做完的方案「${esc(d.plan.name || d.desc.slice(0, 20))}」 `;
+  const b = document.createElement('button'); b.type = 'button'; b.className = 'ghost small'; b.textContent = '恢复它';
+  b.onclick = () => { planDesc = d.desc; $('#npDesc').value = d.desc; showPlan(d.plan); };
+  st.appendChild(b);
 }
 const LOOK_NAMES = { clean: '干净通用', industrial: '工业现场', warm: '温暖服务', bold: '活力醒目', editorial: '克制专业', compact: '紧凑数据' };
 const LAYOUT_NAMES = { topbar: '顶栏', sidebar: '侧边栏', tabbar: '手机底栏', hero: '首屏横幅', board: '状态墙' };
@@ -574,7 +629,7 @@ async function showSketchThumb(card, sk) { // sk = { html, device }
   card.querySelector('.pp-sk')?.remove();
   const wrap = document.createElement('div'); wrap.className = 'pp-sk'; wrap.title = '点击放大';
   const f = document.createElement('iframe'); f.setAttribute('sandbox', ''); f.tabIndex = -1; f.srcdoc = await sketchDoc(html);
-  wrap.appendChild(f); card.insertBefore(wrap, card.firstChild);
+  wrap.appendChild(f); wrap.insertAdjacentHTML('beforeend', '<span class="zoom">🔍 放大</span>'); card.insertBefore(wrap, card.firstChild);
   if (mobile) f.classList.add('m');
   // desktop: 1280 wide fills the card; phone: 390×844 scaled to the card height, centred
   const fit = () => { const k = mobile ? wrap.clientHeight / 844 : wrap.clientWidth / 1280; f.style.transform = `scale(${k})`; f.style.left = mobile ? `${(wrap.clientWidth - 390 * k) / 2}px` : '0'; };
@@ -582,6 +637,7 @@ async function showSketchThumb(card, sk) { // sk = { html, device }
   wrap.onclick = async e => { e.stopPropagation(); card.click(); $('#skFrame').classList.toggle('m', mobile); $('#skFrame').srcdoc = await sketchDoc(html); $('#skTitle').textContent = card.querySelector('b').textContent; $('#dlgSketch').showModal(); };
 }
 $('#skClose').onclick = () => $('#dlgSketch').close();
+$('#skUse').onclick = () => $('#dlgSketch').close(); // the card was already selected when the sketch was opened
 $('#ppSketch').onclick = async () => {
   const plan = lastPlan; if (!plan?.designs?.length) return;
   const btn = $('#ppSketch'); btn.disabled = true;
@@ -591,7 +647,7 @@ $('#ppSketch').onclick = async () => {
   let fail = 0;
   await Promise.all(cards.map(async (card, i) => {
     card.querySelector('.pp-sk')?.remove();
-    card.insertAdjacentHTML('afterbegin', '<div class="pp-sk loading">绘制中…</div>');
+    card.insertAdjacentHTML('afterbegin', '<div class="pp-sk loading">绘制中…（约 40 秒）</div>');
     try {
       const sk = await api('/api/projects/sketch', { method: 'POST', body: { plan: { ...current, design: i }, index: i, description: planDesc } });
       if (lastPlan !== plan) return;
@@ -609,11 +665,11 @@ function readPlan() {
     flows: ppValues('flows'), sampleData: $('#ppSample').value.trim(), highlights: ppValues('highlights'), outOfScope: ppValues('outOfScope'),
     notes: $('#ppNotes').value.trim(),
     designs: lastPlan?.designs || [], design: planDesign,
-    hypothesis: $('#ppHyp').value.trim(), signals: ppValues('signals'),
+    hypothesis: $('#ppHyp').value.trim(), criteria: $('#ppCriteria').value.trim(), signals: ppValues('signals'),
   };
 }
 async function genPlan(statusEl) {
-  const btns = ['#npPlan', '#ppRegen', '#ppOk'].map(s => $(s)); btns.forEach(b => b.disabled = true);
+  const btns = ['#npPlan', '#npAuto', '#npSkip', '#ppRegen', '#ppOk'].map(s => $(s)); btns.forEach(b => b.disabled = true);
   statusEl.textContent = 'AI 正在出方案（约 10–30 秒）…';
   try { const { plan } = await api('/api/projects/plan', { method: 'POST', body: { description: planDesc } }); showPlan(plan); }
   catch (e) { statusEl.textContent = '✗ ' + e.message; }
@@ -677,10 +733,12 @@ $('#npAuto').onclick = async () => {
   finally { autopiloting.delete(p.id); }
 };
 $('#ppBack').onclick = () => npStep(1);
+$('#ppClose').onclick = () => $('#dlgNew').close();
 async function createAndStart(body, statusEl, btn) {
   btn.disabled = true; statusEl.textContent = '正在创建项目…';
   try {
     const p = await api('/api/projects', { method: 'POST', body });
+    planCreated = true; try { localStorage.removeItem(DRAFT_KEY); } catch {}
     $('#dlgNew').close();
     await loadProjects(); await select(p.id);
     send(p.firstMessage, { budget: FIRST_BUILD_BUDGET });
@@ -757,7 +815,9 @@ $('#shInviteCopy').onclick = async e => { e.target.textContent = await copyText(
 async function openShare() {
   const id = current.id;
   $('#shName').textContent = current.name;
-  $('#shHint').textContent = /^(localhost|127\.|\[::1\])/.test(location.hostname) ? '⚠ 你正通过本机地址访问，生成的链接只在这台电脑上能打开；请部署到服务器 / NAS 后再分享。' : '';
+  const local = /^(localhost|127\.|\[::1\])/.test(location.hostname);
+  $('#shHint').textContent = local ? '⚠ 你正通过本机地址访问：生成的链接只在这台电脑上能打开，发给别人是打不开的。请部署到服务器 / NAS，从那里打开 SuperDemo 再分享。' : '';
+  $('#shHint').classList.toggle('warn-box', local);
   const list = await api(`/api/projects/${id}/shares`);
   if (current?.id !== id) return;
   showInvite(list.find(x => x.active)?.token);
@@ -766,7 +826,7 @@ async function openShare() {
   for (const s of list) {
     const li = document.createElement('li'); li.className = s.active ? '' : 'revoked';
     const state = s.revoked ? '已关闭' : !s.active ? '已过期' : s.expiresAt ? `有效至 ${new Date(s.expiresAt).toLocaleString()}` : '永久有效';
-    li.innerHTML = `<div class="vmain"><div class="surl"></div><div class="muted small"></div><div class="sstats" hidden></div></div><button class="ghost stat">统计</button>${s.active ? `<label class="check small" title="页面右下角显示「提意见」按钮"><input type="checkbox" class="fb"${s.feedback !== false ? ' checked' : ''}> 留言</label><button class="ghost copy">复制</button><button class="ghost danger off">关闭</button>` : ''}`;
+    li.innerHTML = `<div class="vmain"><div class="surl"></div><div class="muted small"></div><div class="sstats" hidden></div></div><button class="ghost stat">统计</button>${s.active ? `<label class="check small" title="访客页面右下角显示「💬 说说看法」按钮，可以表态、回答验证问题、留言"><input type="checkbox" class="fb"${s.feedback !== false ? ' checked' : ''}> 允许访客留言</label><button class="ghost copy">复制</button><button class="ghost danger off" title="让这个链接立即失效">停用链接</button>` : ''}`;
     li.querySelector('.stat').onclick = async () => {
       const box = li.querySelector('.sstats');
       if (!box.hidden) { box.hidden = true; return; }
@@ -780,7 +840,7 @@ async function openShare() {
     li.querySelector('.small').textContent = [s.label, state, `打开 ${s.views || 0} 次`, s.lastViewAt ? `最近 ${new Date(s.lastViewAt).toLocaleString()}` : ''].filter(Boolean).join(' · ');
     if (s.active) {
       li.querySelector('.copy').onclick = async e => { e.target.textContent = await copyText(shareUrl(s.token)) ? '已复制' : '复制失败'; };
-      li.querySelector('.off').onclick = async () => { if (!confirm('关闭后这个链接立即失效，确定？')) return; await api(`/api/projects/${id}/shares/${s.token}`, { method: 'DELETE' }); openShare(); };
+      li.querySelector('.off').onclick = async () => { if (!confirm('停用后这个链接立即失效，拿到链接的人将打不开，确定？')) return; await api(`/api/projects/${id}/shares/${s.token}`, { method: 'DELETE' }); openShare(); };
     }
     ul.appendChild(li);
   }
@@ -803,6 +863,7 @@ $('#shCreate').onclick = async () => {
 
 // ---------- header "more" menu ----------
 $('#btnMore').onclick = e => { e.stopPropagation(); $('#moreMenu').hidden = !$('#moreMenu').hidden; };
+addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#moreMenu').hidden) $('#moreMenu').hidden = true; });
 document.addEventListener('click', e => { if (!e.target.closest('.more')) $('#moreMenu').hidden = true; });
 $('#moreMenu').addEventListener('click', e => { if (e.target.closest('button')) $('#moreMenu').hidden = true; });
 
@@ -822,12 +883,15 @@ async function openFeedback() {
   feedback = await api(`/api/projects/${id}/feedback`);
   if (current?.id !== id) return;
   const ul = $('#fbList'); ul.innerHTML = ''; $('#fbAll').checked = false;
-  if (!feedback.length) ul.innerHTML = '<li class="muted small">还没有反馈。生成分享链接发给别人试用，他们点页面右下角「💬 提意见」就能留言。</li>';
+  if (!feedback.length) ul.innerHTML = '<li class="muted small">还没有反馈。生成分享链接发给别人试用，他们点页面右下角「💬 说说看法」就能留言。</li>';
   const ST = { new: '未处理', sent: '已交给 AI', done: '已处理' };
   for (const f of feedback) {
     const li = document.createElement('li'); li.className = 'st-' + f.status;
     li.innerHTML = `<input type="checkbox" data-id="${esc(f.id)}"><div class="vmain"><div class="fbtext"></div><div class="muted small"></div></div>`;
-    li.querySelector('.fbtext').textContent = f.text;
+    const RX = { up: '👍 有用', meh: '🤔 一般', down: '👎 用不上' };
+    const suspicious = /(run_command|\.env|api[_ -]?key|环境变量|密钥|cat\s+\/|rm\s+-rf|忽略(之前|以上)的?(指令|要求)|ignore (all|previous))/i.test([f.text, ...(f.answers || []).map(a => a.a)].join(' '));
+    li.querySelector('.fbtext').textContent = [f.reaction && RX[f.reaction], f.text, ...(f.answers || []).map(a => `（${a.q} → ${a.a}）`)].filter(Boolean).join('  ');
+    if (suspicious) li.querySelector('.fbtext').insertAdjacentHTML('afterbegin', '<span class="tag-sus" title="内容像是在让 AI 执行命令或读取密钥：交给 AI 时会被忽略">⚠ 可疑</span> ');
     li.querySelector('.small').textContent = [ST[f.status], new Date(f.ts).toLocaleString(), f.name, f.contact ? '📇 想内测：' + f.contact : '', f.page && f.page !== '/' ? '页面 ' + f.page : '', f.viewport && parseInt(f.viewport) < 600 ? '📱 手机' : '', f.share?.label ? '来自链接「' + f.share.label + '」' : ''].filter(Boolean).join(' · ');
     ul.appendChild(li);
   }
@@ -983,11 +1047,36 @@ const firstLine = s => String(s ?? '').split('\n')[0].replace(/^\[系统\]\s*/, 
 $('#tokenStats').onclick = () => UsageDialog.open('today');
 
 // ---------- idea board (home): ideas move building -> ready -> validating -> concluded ----------
-const STAGES = [['building', '✍️', '制作中', '新想法在这里，AI 做好第一版就会往右移'], ['ready', '📤', '待分享', 'Demo 做好了：点卡片 → 分享，发给目标用户试'],
+const STAGES = [['building', '✍️', '制作中', '新想法在这里，AI 做好第一版就会移到下一栏'], ['ready', '📤', '待分享', 'Demo 做好了：点卡片 → 分享，发给目标用户试'],
   ['validating', '🧪', '验证中', '已分享，等试用者表态和回答验证问题'], ['concluded', '✅', '有结论', '证据够了就在「📊 验证」里生成结论']];
-function showBoard() { document.body.classList.add('view-board'); if (isPhone()) setTab('projects'); renderBoard(); }
+// example ideas: a newcomer sees what a "one-sentence idea" looks like and can start from one with a click
+const EXAMPLES = [
+  ['🏪', '门店', '连锁便利店店长每天盘点临期商品，系统提醒哪些该打折、该下架，AI 给促销建议'],
+  ['🔧', '工厂', '工厂设备巡检：巡检员用手机扫设备码记录结果，发现故障一键报修，主管看维修进度'],
+  ['🥬', '摊位', '菜市场摊主用手机随手记每天进货和卖出，收摊后看今天赚了多少、明天该少进什么'],
+  ['🩺', '社区', '社区护士每周电话回访高血压患者，记录血压和用药，系统提醒谁该回访、谁控制不好'],
+  ['🚗', '培训', '驾校教练每周放出练车时段，学员在手机上预约，练完教练打个评价'],
+  ['🏠', '家装', '装修公司销售在客户家现场选材料、量面积，当场算出报价单发给客户'],
+];
+const useExample = text => openNewIdea(text);
+function renderIntro() {
+  const box = $('#boardIntro'), few = projects.length < 3;
+  box.hidden = !few;
+  if (!few) return;
+  box.innerHTML = `<div class="bi-steps"><span><b>①</b> 写一句想法</span><span><b>②</b> AI 出方案、做 Demo，模拟用户先挑一遍毛病</span><span><b>③</b> 把链接发给目标用户，看他们动不动手，AI 帮你下结论</span></div>
+    <div class="muted small">从一个例子开始（点一下，改成你自己的也行）：</div>
+    <div class="bi-ex">${EXAMPLES.map(([i, tag, t], k) => `<button class="ex" data-k="${k}"><span class="i">${i}</span><span class="tag">${tag}</span><span class="t">${esc(t)}</span></button>`).join('')}</div>`;
+  box.querySelectorAll('.ex').forEach(b => { b.onclick = () => useExample(EXAMPLES[+b.dataset.k][2]); });
+}
+function renderExampleChips() {
+  $('#npExamples').innerHTML = '<span class="muted small">例子：</span>' + EXAMPLES.slice(0, 4).map(([i, tag], k) => `<button type="button" class="chip" data-k="${k}">${i} ${tag}</button>`).join('');
+  $('#npExamples').querySelectorAll('.chip').forEach(b => { b.onclick = () => { $('#npDesc').value = EXAMPLES[+b.dataset.k][2]; $('#npDesc').focus(); }; });
+}
+
+function showBoard() { if (location.hash.startsWith('#/p/')) history.pushState(null, '', location.pathname); document.body.classList.add('view-board'); if (isPhone()) setTab('projects'); renderBoard(); }
 function renderBoard() {
   if (!document.body.classList.contains('view-board')) return;
+  renderIntro();
   const cols = $('#boardCols'); cols.innerHTML = '';
   for (const [stage, icon, title, hint] of STAGES) {
     const list = projects.filter(p => (p.validation?.stage || 'building') === stage);
@@ -997,9 +1086,9 @@ function renderBoard() {
     for (const p of list) {
       const v = p.validation || {}, r = v.reactions || { up: 0, meh: 0, down: 0 }, total = r.up + r.meh + r.down;
       const card = document.createElement('div'); card.className = 'icard';
-      card.innerHTML = `<div class="shot${v.thumb ? '' : ' none'}">${v.thumb ? '' : '◇'}</div><div class="body"><div class="name"><span class="dot ${p.status}"></span><span></span>${isBusy(p) ? '<span class="thinking small">⋯</span>' : ''}</div>
+      card.innerHTML = `<div class="shot${v.thumb ? '' : ' none'}">${v.thumb ? '' : (p.validation?.stage === 'building' ? '制作中…' : '还没有截图')}</div><div class="body"><div class="name"><span class="dot ${p.status}"></span><span></span>${isBusy(p) ? '<span class="thinking small">⋯</span>' : ''}</div>
         <div class="hyp"></div><div class="sig">${total ? `<span class="rxbar" title="👍 ${r.up} · 🤔 ${r.meh} · 👎 ${r.down}"><i style="width:${r.up / total * 100}%;background:#3fb950"></i><i style="width:${r.meh / total * 100}%;background:#d29922"></i><i style="width:${r.down / total * 100}%;background:#e5534b"></i></span>` : ''}
-        ${total ? `<span>👍${r.up} 🤔${r.meh} 👎${r.down}</span>` : ''}${!total && v.pretest ? `<span class="muted" title="AI 模拟试用（不算真实证据）">模拟 👍${v.pretest.up} 🤔${v.pretest.meh} 👎${v.pretest.down}</span>` : ''}${v.actors ? `<span title="动手操作过的访客">🛠 ${v.actors}</span>` : ''}${v.feedback ? `<span>💬 ${v.feedback}</span>` : ''}${v.verdict ? `<span class="verdict ${v.verdict}">${esc(v.verdictLabel)}</span>` : ''}</div></div>`;
+        ${total ? `<span>👍${r.up} 🤔${r.meh} 👎${r.down}</span>` : ''}${!total && v.pretest ? `<span class="sim" title="AI 扮演的模拟用户的表态，不是真人反馈">AI 模拟（非真人）👍${v.pretest.up} 🤔${v.pretest.meh} 👎${v.pretest.down}</span>` : ''}${v.actors ? `<span title="动手操作过的访客">🛠 ${v.actors}</span>` : ''}${v.feedback ? `<span>💬 ${v.feedback}</span>` : ''}${v.verdict ? `<span class="verdict ${v.verdict}">${esc(v.verdictLabel)}</span>` : ''}</div></div>`;
       if (v.thumb) card.querySelector('.shot').style.backgroundImage = `url("/api/projects/${p.id}/shots/${v.thumb}")`;
       card.querySelector('.name span:nth-child(2)').textContent = p.name;
       card.querySelector('.hyp').textContent = v.hypothesis || p.description || '';
@@ -1010,6 +1099,9 @@ function renderBoard() {
   }
 }
 $('#bdNew').onclick = () => $('#newProject').click();
+$('#btnBoard').onclick = showBoard;
+addEventListener('hashchange', () => { const m = location.hash.match(/^#\/p\/(\w+)/); if (m) { if (current?.id !== m[1] || document.body.classList.contains('view-board')) select(m[1]); } else showBoard(); });
+addEventListener('popstate', () => { if (!location.hash) showBoard(); });
 $('#bdSettings').onclick = () => $('#openSettings').click();
 document.querySelector('.brand-text').style.cursor = 'pointer';
 document.querySelector('.brand-text').onclick = showBoard;
@@ -1020,6 +1112,7 @@ async function openReport() {
   const id = current.id;
   $('#rpName').textContent = current.name;
   $('#rpHyp').textContent = current.validation?.hypothesis ? '要验证：' + current.validation.hypothesis : '要验证：' + (current.description || '');
+  if (current.plan?.criteria) $('#rpHyp').textContent += '\n成立标准：' + current.plan.criteria;
   const { report, evidence: ev, round, previous } = await api(`/api/projects/${id}/report`);
   if (current?.id !== id) return;
   renderRound(round, previous);
@@ -1039,7 +1132,7 @@ function renderRound(round, prev) {
 function renderReport(report, ev) {
   const r = ev.reactions;
   const secs = ev.medianMs != null ? Math.round(ev.medianMs / 1000) : null;
-  $('#rpStats').innerHTML = [['访客', ev.visitors], ['动手操作', ev.actors ?? 0, '提交、保存这类真实操作过的访客'], ['留联系方式', ev.contacts ?? 0, '点了「有用」并留下微信/手机号、想上线后第一时间用上的人'], ['停留中位数', secs == null ? '–' : secs >= 100 ? `${Math.round(secs / 6) / 10}分` : `${secs}秒`], ['👍 有用', r.up], ['🤔 一般', r.meh], ['👎 用不上', r.down]]
+  $('#rpStats').innerHTML = [['访客', ev.visitors], ['真动手的人', ev.actors ?? 0, '在 Demo 里真的提交、保存过东西的访客'], ['留联系方式', ev.contacts ?? 0, '点了「有用」并留下微信/手机号、想上线后第一时间用上的人'], ['一般看多久', secs == null ? '–' : secs >= 100 ? `${Math.round(secs / 6) / 10}分` : `${secs}秒`], ['👍 有用', r.up], ['🤔 一般', r.meh], ['👎 用不上', r.down]]
     .map(([k, v, t]) => `<div${t ? ` title="${t}"` : ''}><span class="muted small">${k}</span><b>${v}</b></div>`).join('');
   const qa = Object.entries(ev.answers || {});
   let html = '';
@@ -1054,6 +1147,8 @@ function renderReport(report, ev) {
   if (!report && !ev.feedback) html += `<div class="muted small">还没有反馈。点「分享给目标用户」生成链接发出去，试用者在页面右下角就能表态、回答验证问题。发出去之前，可以先点「AI 模拟试用」让模拟用户挑一遍毛病。</div>`;
   $('#rpBody').innerHTML = html;
   $('#rpGen').disabled = !ev.feedback; $('#rpInfo').textContent = '';
+  // the most useful next step is the primary button: no evidence yet -> share; evidence -> write the verdict
+  $('#rpShare').className = ev.feedback ? 'ghost' : 'primary'; $('#rpGen').className = ev.feedback ? 'primary' : 'ghost';
   // how far the evidence is from a stable conclusion (≥ 5 people who reacted)
   const reacted = r.up + r.meh + r.down;
   if (ev.feedback && reacted < 5) $('#rpInfo').textContent = `已有 ${reacted} 人表态，再收集 ${5 - reacted} 人，结论会更可信`;
@@ -1143,6 +1238,8 @@ $('#rpPretest').onclick = async () => {
 // ---------- phone layout: bottom tabs switch between projects / chat / preview ----------
 const isPhone = () => matchMedia('(max-width: 760px)').matches;
 function setTab(t) {
+  // chat / preview need a project: without one stay on the board and say why
+  if (t !== 'projects' && !current) { t = 'projects'; setTimeout(() => alert('先在看板上点一个想法，或者点「＋ 新想法」新建一个'), 0); }
   document.body.classList.remove('m-projects', 'm-chat', 'm-preview');
   document.body.classList.add('m-' + t);
   if (t === 'projects') { document.body.classList.add('view-board'); renderBoard(); }
@@ -1168,7 +1265,8 @@ document.addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && !e.s
   setInterval(() => UsageDialog.refreshSummary(), 60000);
   await loadSettings();
   await loadProjects();
-  showBoard(); // home = idea board
+  const start = location.hash.match(/^#\/p\/(\w+)/)?.[1];
+  if (start && projects.some(p => p.id === start)) await select(start); else showBoard(); // home = idea board (or the project in the address)
   renderHeader();
   if (!settings.hasKey) toggleSettings(true);
   setInterval(loadProjects, 5000);

@@ -16,7 +16,7 @@ import { listShares, createShare, revokeShare, deleteSharesOf, setShareOptions, 
 import { testConnection } from './llm.js';
 import { runAgent, attachRun, stopRun, interject, listQueue, enqueue, dequeue, clearQueue, isBusy, usageSummary, generateProjectName, getContextInfo, claimBrowser, resolveBrowser, shotPath } from './agent.js';
 import { summary as usageLogSummary, readLog, backfillIfNeeded } from './usagelog.js';
-import { listSessions, createSession, renameSession, deleteSession, setCurrentSession, loadHistory, clearHistory, lastChatAt, appendHistory } from './sessions.js';
+import { turnLabel, listSessions, createSession, renameSession, deleteSession, setCurrentSession, loadHistory, clearHistory, lastChatAt, appendHistory } from './sessions.js';
 import { zipProject, dockerInfo, imageInfo, buildImage, isBuilding, saveImage, runHints } from './export.js';
 import zlib from 'node:zlib';
 import { authMiddleware, checkRequest, startupProblem, HOST, isLoopbackHost, passwordEnabled } from './auth.js';
@@ -249,7 +249,7 @@ app.patch('/api/projects/:id/shares/:token', wrap((req, res) => res.json(setShar
 app.get('/api/projects/:id/shares/:token/stats', wrap((req, res) => res.json(shareStats(req.params.token))));
 
 // ---- versions (per-turn code snapshots) ----
-app.get('/api/projects/:id/snapshots', wrap((req, res) => res.json(listSnapshots(req.params.id))));
+app.get('/api/projects/:id/snapshots', wrap((req, res) => res.json(listSnapshots(req.params.id).map(x => ({ ...x, label: turnLabel(x.label) })))));
 app.post('/api/projects/:id/snapshots/:sid/restore', wrap(async (req, res) => {
   const id = req.params.id;
   if (isBusy(id)) return res.status(409).json({ error: 'AI 正在处理，请先停止或等待完成' });
@@ -320,7 +320,7 @@ app.get('/api/usage/log', wrap((req, res) => {
 }));
 
 // ---- sessions ----
-app.get('/api/projects/:id/sessions', wrap((req, res) => res.json(listSessions(req.params.id))));
+app.get('/api/projects/:id/sessions', wrap((req, res) => { const r = listSessions(req.params.id); res.json({ ...r, list: r.list.map(x => (x.manualTitle ? x : { ...x, title: turnLabel(x.title) })) }); }));
 app.post('/api/projects/:id/sessions', wrap((req, res) => res.json(createSession(req.params.id, req.body?.title))));
 app.patch('/api/projects/:id/sessions/:sid', wrap((req, res) => res.json(renameSession(req.params.id, req.params.sid, req.body?.title))));
 app.delete('/api/projects/:id/sessions/:sid', wrap((req, res) => res.json({ current: deleteSession(req.params.id, req.params.sid) })));

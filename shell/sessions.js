@@ -4,6 +4,19 @@ import path from 'node:path';
 import { projectDir } from './registry.js';
 
 const DEFAULT_TITLE = '新会话';
+
+// Messages the UI sends on the user's behalf are long instructions for the agent; versions and session titles get a
+// short human label instead of their first line.
+const TURN_LABELS = [
+  [/^请按下面已经和用户确认的方案/, '按方案制作第一版'], [/^请根据以下需求改造这个项目/, '按需求制作第一版'],
+  [/^以下是别人(通过分享链接)?试用/, '按访客反馈修改'], [/^根据试用验证的结论改出/, '按验证结论改一版'],
+  [/^分享给真人试用前，先按 AI 模拟试用/, '按模拟试用意见修改'],
+];
+export function turnLabel(message) {
+  const t = String(message || '').trim();
+  for (const [re, label] of TURN_LABELS) if (re.test(t)) return label;
+  return t.split('\n').find(Boolean)?.slice(0, 40) || '';
+}
 const metaDir = id => path.join(projectDir(id), '.superdemo');
 const sessionsDir = id => path.join(metaDir(id), 'sessions');
 const indexFile = id => path.join(metaDir(id), 'sessions.json');
@@ -124,7 +137,7 @@ function touch(id, sid, firstUser) {
   const s = idx.list.find(x => x.id === sid);
   if (!s) return;
   s.updatedAt = new Date().toISOString();
-  if (firstUser && !s.manualTitle && (s.title === DEFAULT_TITLE || s.title === '默认会话')) s.title = String(firstUser.content).split('\n')[0].slice(0, 30);
+  if (firstUser && !s.manualTitle && (s.title === DEFAULT_TITLE || s.title === '默认会话')) s.title = turnLabel(firstUser.content).slice(0, 30);
   writeIndex(id, idx);
 }
 

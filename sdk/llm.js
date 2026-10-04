@@ -25,9 +25,9 @@ function record(usage, ms) {
 
 // In-app AI should answer fast: "thinking" (reasoning) is switched off unless a call asks for it with { thinking: true }.
 // Providers name the switch differently (Qwen/DashScope: enable_thinking, GLM/DeepSeek gateways: thinking.type); if a
-// provider rejects these fields we drop them for the rest of the process.
+// model rejects these fields (e.g. glm-5.3 only allows thinking) we stop sending them to that model.
 const THINKING_OFF = { enable_thinking: false, thinking: { type: 'disabled' } };
-let thinkingParamsOk = true;
+const noThinkingSwitch = new Set(); // models that reject the switch
 const DEFAULT_TIMEOUT = 90_000;
 
 /**
@@ -60,10 +60,10 @@ async function chat(messages, { temperature = 0.4, model, tools, maxTokens, sign
     }
   };
   const t0 = Date.now();
-  const switchOff = !thinking && thinkingParamsOk;
+  const switchOff = !thinking && !noThinkingSwitch.has(body.model);
   let res = await send(switchOff), text = await res.text();
   if (switchOff && res.status === 400 && /thinking|unrecognized|unknown|extra|not permitted|additional/i.test(text)) {
-    thinkingParamsOk = false; // this provider doesn't take the switch: plain requests from now on
+    noThinkingSwitch.add(body.model); // this model doesn't take the switch: plain requests from now on
     res = await send(false); text = await res.text();
   }
   if (!res.ok) throw new Error(`LLM HTTP ${res.status}: ${text.slice(0, 300)}`);

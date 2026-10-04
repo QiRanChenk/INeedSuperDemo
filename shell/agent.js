@@ -5,7 +5,7 @@ import { chat, StoppedError } from './llm.js';
 import { getSettings, saveSettings, visionEnabled, childEnv, SDK_DIR, TEMPLATES_DIR } from './config.js';
 import { readProject, projectDir, safePath, fileTree, PROJECT_TYPES } from './registry.js';
 import { restart, logs, status, waitForPort } from './runner.js';
-import { loadHistory, appendHistory, resolveSession } from './sessions.js';
+import { loadHistory, appendHistory, resolveSession, turnLabel } from './sessions.js';
 import { logUsage } from './usagelog.js';
 import { readText, editFile, grepFiles, checkSyntax, httpRequest } from './tools.js';
 import { fingerprint, diffFingerprints, createSnapshot, deleteSnapshot, annotateSnapshot } from './snapshots.js';
@@ -552,7 +552,7 @@ export async function runAgent(id, userMessage, onEvent, sessionId, opts = {}) {
 
 // Every turn starts with a code snapshot so the user can undo it; dropped again when the turn changed nothing.
 function beginSnapshot(id, sid, userMessage) {
-  try { return { fp: fingerprint(id), entry: createSnapshot(id, { label: String(userMessage).split('\n').find(Boolean) || '', sid }) }; }
+  try { return { fp: fingerprint(id), entry: createSnapshot(id, { label: turnLabel(userMessage), sid }) }; }
   catch (e) { console.error(`[snapshot] ${id}:`, e.message); return null; }
 }
 function endSnapshot(id, snap) {

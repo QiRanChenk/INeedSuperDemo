@@ -16,7 +16,7 @@ export class StoppedError extends Error { constructor() { super('已停止'); th
 // One-shot JSON/HTML tasks (plan, report, tour, pre-test, sketch) pass thinking:false: gateways that think by default are
 // several times slower and may spend the answer budget on reasoning. If the provider rejects the switch, drop it for good.
 const THINKING_OFF = { enable_thinking: false, thinking: { type: 'disabled' } };
-let thinkingParamsOk = true;
+const noThinkingSwitch = new Set(); // baseUrl|model that reject the switch (e.g. glm-5.3: "enable_thinking is restricted to True")
 
 export async function chat({ messages, tools, temperature, settings, onDelta, signal, thinking, maxTokens }) {
   const s = settings || getSettings();
@@ -28,7 +28,8 @@ export async function chat({ messages, tools, temperature, settings, onDelta, si
   if (stream) body.stream_options = { include_usage: true };
   if (tools?.length) { body.tools = tools; body.tool_choice = 'auto'; }
   if (maxTokens) body.max_tokens = maxTokens;
-  const switchOff = thinking === false && thinkingParamsOk;
+  const modelKey = s.baseUrl + '|' + s.model;
+  const switchOff = thinking === false && !noThinkingSwitch.has(modelKey);
   if (switchOff) Object.assign(body, THINKING_OFF);
 
   const t0 = Date.now();
@@ -47,7 +48,7 @@ export async function chat({ messages, tools, temperature, settings, onDelta, si
     if (!res.ok) {
       const text = await res.text();
       if (switchOff && res.status === 400 && /thinking|unrecognized|unknown|extra|not permitted|additional/i.test(text)) {
-        thinkingParamsOk = false;
+        noThinkingSwitch.add(modelKey);
         clearTimeout(timer); signal?.removeEventListener('abort', onStop);
         return chat({ messages, tools, temperature, settings, onDelta, signal, maxTokens });
       }
