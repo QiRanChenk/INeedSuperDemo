@@ -3,10 +3,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const PROJECTS_DIR = path.join(ROOT, 'projects');
+// overridable (tests run a throwaway shell against temp dirs)
+export const PROJECTS_DIR = process.env.SUPERDEMO_PROJECTS_DIR || path.join(ROOT, 'projects');
 export const TEMPLATES_DIR = path.join(ROOT, 'templates');
 export const SDK_DIR = path.join(ROOT, 'sdk');
-export const DATA_DIR = path.join(ROOT, 'data');
+export const DATA_DIR = process.env.SUPERDEMO_DATA_DIR || path.join(ROOT, 'data');
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 
 export const PRESETS = [

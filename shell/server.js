@@ -206,7 +206,7 @@ function validationOf(p) {
   const report = getReport(p.id), shares = listShares(p.id).filter(s => s.active).length, chatted = !!lastChatAt(p.id);
   const stage = isBusy(p.id) || !chatted ? 'building' : report ? 'concluded' : shares ? 'validating' : 'ready';
   let thumb = null;
-  try { thumb = fs.readdirSync(path.join(ROOT, 'projects', p.id, '.superdemo', 'shots')).filter(f => f.endsWith('.jpg') && !f.endsWith('-m.jpg')).sort().pop() || null; } catch {} // desktop shots only
+  try { thumb = fs.readdirSync(path.join(projectDir(p.id), '.superdemo', 'shots')).filter(f => f.endsWith('.jpg') && !f.endsWith('-m.jpg')).sort().pop() || null; } catch {} // desktop shots only
   const sketchPending = !p.built && fs.existsSync(path.join(projectDir(p.id), 'sketch.html'));
   let actors = 0; for (const s of listShares(p.id)) actors += shareStats(s.token, 14, since).actors;
   const pt = getPretest(p.id), pretest = pt ? { up: 0, meh: 0, down: 0 } : null;
