@@ -26,12 +26,11 @@
 
 <section id="chat">
   <header>
-    <div>
+    <div class="phead">
       <div class="row" style="gap:6px"><button id="btnBoard" class="ghost small" title="回到想法看板">← 看板</button><div id="pName" class="pname">选择或新建一个项目</div></div>
-      <div id="pMeta" class="muted small"></div>
+      <div class="row pmeta-row"><span id="pMeta" class="muted small"></span><button id="btnToggle" class="ghost small" title="停止运行这个 Demo（不删除，随时可以再启动）">■ 停止</button></div>
     </div>
     <div class="actions">
-      <button id="btnToggle" class="ghost" title="启动/停止">■ 停止</button>
       <button id="btnRestart" class="ghost" title="重启">↻</button>
       <button id="btnReport" class="ghost" title="试用表态、验证问题的回答和 AI 结论">📊 验证</button>
       <button id="btnVersions" class="ghost" title="每轮对话前自动保存的版本，可一键回滚">版本</button>
@@ -95,20 +94,34 @@
   </div>
 </section>
 
-<!-- new project dialog -->
+<!-- new idea: a "new conversation" entry in the main area — one sentence in, AI takes it from there -->
+<section id="newIdea">
+  <div class="ni-top"><button type="button" id="npCancel" class="ghost small" title="返回 (Esc)">← 返回</button></div>
+  <div class="ni-center">
+    <h2 class="ni-title">有什么想法想验证？</h2>
+    <div class="muted ni-sub">一两句话说清楚给谁用、解决什么，AI 先出方案给你确认，再做成能点的 Demo</div>
+    <div class="ni-box">
+      <textarea id="npDesc" rows="3" placeholder="例如：门店库存预警工具，店长录入商品和库存，低于阈值标红，AI 给补货建议"></textarea>
+      <div class="ni-bar">
+        <div class="ni-modes" role="radiogroup" aria-label="怎么开始">
+          <button type="button" id="npPlan" class="ni-mode on" data-mode="plan" role="radio" aria-checked="true" title="约 10 秒出方案和草图，先看再决定">📋 先出方案</button>
+          <button type="button" id="npAuto" class="ni-mode" data-mode="auto" role="radio" aria-checked="false" title="全自动：出方案 → 按推荐方向画草图并制作 → AI 模拟试用 → 按意见改一版（约 12–18 分钟，不用盯着；保持这个页面打开）">⚡ 一键到底</button>
+          <button type="button" id="npSkip" class="ni-mode" data-mode="skip" role="radio" aria-checked="false" title="不出方案，直接按描述开始制作">跳过方案直接做</button>
+          <select id="npType" class="dev-only" title="项目类型"></select>
+        </div>
+        <button type="button" id="npGo" class="primary ni-send" title="开始 (Enter；Shift+Enter 换行)" aria-label="开始">↑</button>
+      </div>
+    </div>
+    <div id="npStatus" class="small muted ni-status"></div>
+    <div id="npExamples" class="np-examples"></div>
+    <div id="npHint" class="muted small ni-hint"></div>
+  </div>
+</section>
+
+<!-- plan confirmation dialog -->
 <dialog id="dlgNew" class="plan-dlg">
   <div class="dlg">
-    <section id="npStep1" class="dlg-step">
-      <h3>新想法</h3>
-      <label><span class="lbl">你想做什么？<span class="req">*</span><span class="muted">一两句话就行，AI 会先出一份方案给你确认</span></span>
-        <textarea id="npDesc" rows="4" placeholder="例如：门店库存预警工具，店长录入商品和库存，低于阈值标红，AI 给补货建议"></textarea></label>
-      <div id="npExamples" class="np-examples"></div>
-      <label class="dev-only">项目类型<select id="npType"></select></label>
-      <div id="npStatus" class="small muted"></div>
-      <div class="row end"><button type="button" id="npCancel" class="ghost">取消</button><button type="button" id="npSkip" class="ghost" title="不出方案，直接按描述开始制作">跳过方案直接做</button><button type="button" id="npAuto" class="ghost" title="全自动：出方案 → 按推荐方向画草图并制作 → AI 模拟试用 → 按意见改一版（约 12–18 分钟，不用盯着；保持这个页面打开）">⚡ 一键到底</button><button type="button" id="npPlan" class="primary">生成方案</button></div>
-      <div class="muted small np-hint">「生成方案」约 10 秒，先看方案和草图再决定；「⚡ 一键到底」全自动做完（方案 → 草图 → 制作 → 模拟用户挑毛病 → 修改），约 12–18 分钟，期间保持页面打开</div>
-    </section>
-    <section id="npStep2" class="dlg-step" hidden>
+    <section id="npStep2" class="dlg-step">
       <div class="row between"><h3>确认方案</h3><span class="muted small" style="flex:1;margin-left:10px">按需修改，确认后 AI 开始制作（关掉也会存为草稿）</span><button type="button" id="ppClose" class="ghost" title="关闭（方案会存为草稿，下次打开可以恢复）">✕</button></div>
       <label>项目名称<input id="ppName" maxlength="20"></label>
       <label>目标<textarea id="ppSummary" rows="2"></textarea></label>
@@ -150,7 +163,7 @@
     <label>Demo 地址（独立端口）<span class="muted small">Demo 预览和分享链接在另一个端口上运行，和 SuperDemo 隔离（Demo 里的代码碰不到 SuperDemo）。默认是「当前地址 + 端口 <span id="stDemoPort"></span>」；通过域名或反向代理访问时，填上指向这个端口的地址，如 https://demo.example.com:8789</span><input id="stDemoUrl" placeholder="https://demo.example.com:8789"></label>
     <label>SuperDemo 的公网地址<span class="muted small">可选。用于群推送里的「查看」链接；没填 Demo 地址时，分享链接也暂用它（这时 Demo 和 SuperDemo 不隔离）</span><input id="stPublic" placeholder="https://demo.example.com"></label>
     <label>新反馈推送到群<span class="muted small">可选。企业微信 / 飞书 / 钉钉群机器人的 Webhook 地址；访客一留反馈就推到群里（不含联系方式），每晚 9 点再推一条当天各想法的验证小结</span><span class="row"><input id="stNotify" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…" style="flex:1"><button type="button" id="stNotifyTest" class="ghost">发条测试</button></span></label>
-    <label class="check"><input type="checkbox" id="stDev"> 显示技术细节（端口、Token 用量、启停按钮、运行日志、文件）</label>
+    <label class="check"><input type="checkbox" id="stDev"> 显示技术细节（端口、Token 用量、重启按钮、运行日志、文件）</label>
     <label>页面截图给模型<select id="stVision"><option value="auto">自动（先发送，模型不支持时自动关闭）</option><option value="on">总是发送</option><option value="off">不发送（只用页面结构文本）</option></select></label>
     <div id="stVisionState" class="small muted"></div>
     <div id="stResult" class="small muted"></div>

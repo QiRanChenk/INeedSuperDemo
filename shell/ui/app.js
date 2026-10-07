@@ -40,7 +40,7 @@ async function loadProjects() {
 }
 
 async function select(id) {
-  document.body.classList.remove('view-board');
+  document.body.classList.remove('view-board', 'view-new');
   if (location.hash !== '#/p/' + id) location.hash = '/p/' + id; // own address: bookmarkable, browser back returns to the board
   if (current?.id === id) { if (isPhone()) setTab('chat'); return; }
   current = projects.find(p => p.id === id) || null;
@@ -149,6 +149,8 @@ function renderHeader() {
   $('#fbBadge').hidden = !fbn; $('#fbBadge').textContent = fbn; $('#btnFeedback').title = fbn ? `${fbn} 条反馈还没处理` : '别人通过分享链接留下的意见';
   $('#btnRestart').disabled = !live;
   $('#btnToggle').textContent = live ? '■ 停止' : '▶ 启动';
+  $('#btnToggle').title = live ? '停止运行这个 Demo（不删除，随时可以再启动）' : '启动这个 Demo';
+  $('#btnToggle').hidden = !has;
   $('#btnToggle').classList.toggle('start', has && !live);
   document.body.classList.toggle('no-preview', has && !live);
   if (has && !live && $('#frame').src !== 'about:blank') PageBot.clear($('#frame'));
@@ -521,7 +523,28 @@ $('#stClose').onclick = () => toggleSettings(false);
 
 // ---------- new project: requirement -> plan (editable) -> create + first message ----------
 let planDesc = '', skeletons = [], lastPlan = null;
-const npStep = n => { $('#npStep1').hidden = n !== 1; $('#npStep2').hidden = n !== 2; };
+// step 1 is a "new conversation" view in the main area; step 2 (confirm the plan) is a dialog over it
+const npStep = n => { if (n === 1) { $('#dlgNew').close(); $('#npDesc').focus(); } else if (!$('#dlgNew').open) $('#dlgNew').showModal(); };
+let npMode = 'plan', npFrom = null;
+const NP_HINTS = { plan: '约 10 秒出方案，先看方案和草图再决定做不做', auto: '全自动做完：方案 → 草图 → 制作 → 模拟用户挑毛病 → 修改，约 12–18 分钟，期间保持页面打开', skip: '不出方案，按你写的直接开始制作（约 8–10 分钟）' };
+function setNpMode(m) {
+  npMode = m;
+  for (const b of document.querySelectorAll('.ni-mode')) { const on = b.dataset.mode === m; b.classList.toggle('on', on); b.setAttribute('aria-checked', on); }
+  $('#npHint').textContent = NP_HINTS[m];
+}
+for (const b of document.querySelectorAll('.ni-mode')) b.onclick = () => { setNpMode(b.dataset.mode); $('#npDesc').focus(); };
+const npGrow = () => { const t = $('#npDesc'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 320) + 'px'; };
+$('#npDesc').addEventListener('input', npGrow);
+$('#npDesc').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); $('#npGo').click(); }
+});
+$('#npGo').onclick = () => { if (!$('#npGo').disabled) ({ plan: npPlan, auto: npAuto, skip: npSkip })[npMode](); };
+const npBusy = on => ['#npGo', '#npPlan', '#npAuto', '#npSkip'].forEach(s => $(s).disabled = on);
+function closeNewIdea() {
+  if (!document.body.classList.contains('view-new')) return;
+  document.body.classList.remove('view-new');
+  if (npFrom && projects.some(p => p.id === npFrom)) select(npFrom); else showBoard();
+}
 async function openNewIdea(prefill = '') {
   // nothing works without a model: send a first-time user to the settings instead of a dialog that will fail
   if (settings && !(settings.hasKey && settings.baseUrl && settings.model)) { toggleSettings(true); alert('先配置 AI 模型：填写 Base URL、Model 和 API Key（在左下角 ⚙ 也能打开），保存后再来写想法。'); return; }
@@ -529,14 +552,18 @@ async function openNewIdea(prefill = '') {
   skeletons = sks;
   const sel = $('#npType'); sel.innerHTML = '';
   for (const t of types) { const o = document.createElement('option'); o.value = t.id; o.textContent = t.label; o.disabled = !t.available; sel.appendChild(o); }
-  $('#npDesc').value = prefill; $('#npStatus').textContent = prefill ? '可以直接改成你自己的想法。点「生成方案」先看方案，或「⚡ 一键到底」全自动做完' : '';
-  renderExampleChips(); planCreated = false;
-  npStep(1); $('#dlgNew').showModal(); $('#npDesc').focus();
+  $('#npType').onchange();
+  if (!document.body.classList.contains('view-new')) npFrom = document.body.classList.contains('view-board') ? null : current?.id || null;
+  document.body.classList.remove('view-board'); document.body.classList.add('view-new');
+  $('#npDesc').value = prefill; $('#npStatus').textContent = prefill ? '可以直接改成你自己的想法，然后按 Enter 开始' : '';
+  renderExampleChips(); planCreated = false; setNpMode(npMode);
+  npStep(1); npGrow();
   if (!prefill) offerDraft();
 }
 $('#newProject').onclick = () => openNewIdea();
-$('#npCancel').onclick = () => $('#dlgNew').close();
-$('#npType').onchange = () => { const web = $('#npType').value === 'web'; $('#npPlan').hidden = !web; $('#npSkip').textContent = web ? '跳过方案直接做' : '创建并开始'; };
+$('#npCancel').onclick = closeNewIdea;
+addEventListener('keydown', e => { if (e.key === 'Escape' && document.body.classList.contains('view-new') && !document.querySelector('dialog[open]')) closeNewIdea(); });
+$('#npType').onchange = () => { const web = !$('#npType').value || $('#npType').value === 'web'; $('#npPlan').hidden = $('#npAuto').hidden = !web; $('#npSkip').textContent = web ? '跳过方案直接做' : '创建并开始'; if (!web) setNpMode('skip'); };
 
 // list editors for the plan: one input per item
 function ppList(key, items) {
@@ -572,14 +599,14 @@ function showPlan(plan) {
   $('#ppSample').value = plan.sampleData || ''; $('#ppNotes').value = ''; $('#ppStatus').textContent = '';
   renderDesigns(plan.designs || [], plan.design || 0);
   npStep(2);
-  $('#dlgNew').scrollTop = 0; $('#npStep2').scrollIntoView?.({ block: 'start' });
+  $('#dlgNew').scrollTop = 0;
 }
 
 // a generated plan (and its sketches) took a minute and some money: closing the dialog keeps it as a draft
 const DRAFT_KEY = 'sdPlanDraft';
 let planCreated = false;
 $('#dlgNew').addEventListener('close', () => {
-  if (planCreated || $('#npStep2').hidden || !lastPlan) return;
+  if (planCreated || !lastPlan) return;
   try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ ts: Date.now(), desc: planDesc, plan: { ...readPlan(), sketches: lastPlan.sketches || [] } })); } catch {}
 });
 function planDraft() { try { const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); return d && Date.now() - d.ts < 7 * 86400e3 ? d : null; } catch { return null; } }
@@ -587,7 +614,7 @@ function offerDraft() {
   const d = planDraft(); if (!d) return;
   const st = $('#npStatus'); st.innerHTML = `有一份上次没做完的方案「${esc(d.plan.name || d.desc.slice(0, 20))}」 `;
   const b = document.createElement('button'); b.type = 'button'; b.className = 'ghost small'; b.textContent = '恢复它';
-  b.onclick = () => { planDesc = d.desc; $('#npDesc').value = d.desc; showPlan(d.plan); };
+  b.onclick = () => { planDesc = d.desc; $('#npDesc').value = d.desc; npGrow(); showPlan(d.plan); };
   st.appendChild(b);
 }
 const LOOK_NAMES = { clean: '干净通用', industrial: '工业现场', warm: '温暖服务', bold: '活力醒目', editorial: '克制专业', compact: '紧凑数据' };
@@ -674,26 +701,26 @@ function readPlan() {
   };
 }
 async function genPlan(statusEl) {
-  const btns = ['#npPlan', '#npAuto', '#npSkip', '#ppRegen', '#ppOk'].map(s => $(s)); btns.forEach(b => b.disabled = true);
+  const btns = ['#npGo', '#npPlan', '#npAuto', '#npSkip', '#ppRegen', '#ppOk'].map(s => $(s)); btns.forEach(b => b.disabled = true);
   statusEl.textContent = 'AI 正在出方案（约 10–30 秒）…';
   try { const { plan } = await api('/api/projects/plan', { method: 'POST', body: { description: planDesc } }); showPlan(plan); }
   catch (e) { statusEl.textContent = '✗ ' + e.message; }
   finally { btns.forEach(b => b.disabled = false); }
 }
-$('#npPlan').onclick = () => {
+function npPlan() {
   planDesc = $('#npDesc').value.trim();
   if (!planDesc) { $('#npStatus').textContent = '请先写一句你想做什么'; $('#npDesc').focus(); return; }
   genPlan($('#npStatus'));
-};
+}
 $('#ppRegen').onclick = () => genPlan($('#ppStatus'));
 
 // ---------- autopilot: one sentence -> plan -> sketch -> build -> simulated users -> one round of fixes ----------
 const lastDone = new Map(), autopiloting = new Set();
 const FIX_BUDGET = 30; // pre-test fixes are small by design; an out-of-steps turn still ends with a summary
-$('#npAuto').onclick = async () => {
+async function npAuto() {
   const description = $('#npDesc').value.trim(), st = $('#npStatus');
   if (!description) { st.textContent = '请先写一句你想做什么'; $('#npDesc').focus(); return; }
-  const btns = ['#npAuto', '#npPlan', '#npSkip'].map(x => $(x)); btns.forEach(b => b.disabled = true);
+  npBusy(true);
   let p;
   try {
     st.textContent = '1/5 出方案…';
@@ -707,7 +734,7 @@ $('#npAuto').onclick = async () => {
     $('#dlgNew').close();
     await loadProjects(); await select(p.id);
   } catch (e) { st.textContent = '✗ ' + e.message; return; }
-  finally { btns.forEach(b => b.disabled = false); }
+  finally { npBusy(false); }
   autopiloting.add(p.id);
   const say = t => { if (current?.id === p.id) addSys(viewKey(), '⚡ 一键到底 · ' + t); };
   const stopped = () => current?.id !== p.id || lastDone.get(p.id)?.stopped;
@@ -736,7 +763,7 @@ $('#npAuto').onclick = async () => {
     b.onclick = () => openShare(); d.appendChild(b);
   } catch (e) { say('出错了：' + e.message + '（可以在「📊 验证」里手动继续）'); }
   finally { autopiloting.delete(p.id); }
-};
+}
 $('#ppBack').onclick = () => npStep(1);
 $('#ppClose').onclick = () => $('#dlgNew').close();
 async function createAndStart(body, statusEl, btn) {
@@ -751,11 +778,11 @@ async function createAndStart(body, statusEl, btn) {
   finally { btn.disabled = false; }
 }
 $('#ppOk').onclick = () => createAndStart({ description: planDesc, type: 'web', name: $('#ppName').value.trim(), plan: readPlan(), sketch: lastPlan?.sketches?.[planDesign]?.html || '', sketchDevice: lastPlan?.sketches?.[planDesign]?.device || '' }, $('#ppStatus'), $('#ppOk'));
-$('#npSkip').onclick = () => {
+function npSkip() {
   const description = $('#npDesc').value.trim();
   if (!description) { $('#npStatus').textContent = '请先写一句你想做什么'; $('#npDesc').focus(); return; }
-  createAndStart({ description, type: $('#npType').value }, $('#npStatus'), $('#npSkip'));
-};
+  createAndStart({ description, type: $('#npType').value }, $('#npStatus'), $('#npGo'));
+}
 
 // ---------- actions ----------
 $('#btnRestart').onclick = async () => { await api(`/api/projects/${current.id}/restart`, { method: 'POST' }); await loadProjects(); reloadFrame(); };
@@ -1100,7 +1127,7 @@ function renderExampleChips() {
   $('#npExamples').querySelectorAll('.chip').forEach(b => { b.onclick = () => { $('#npDesc').value = EXAMPLES[+b.dataset.k][2]; $('#npDesc').focus(); }; });
 }
 
-function showBoard() { if (location.hash.startsWith('#/p/')) history.pushState(null, '', location.pathname); document.body.classList.add('view-board'); if (isPhone()) setTab('projects'); renderBoard(); }
+function showBoard() { if (location.hash.startsWith('#/p/')) history.pushState(null, '', location.pathname); document.body.classList.remove('view-new'); document.body.classList.add('view-board'); if (isPhone()) setTab('projects'); renderBoard(); }
 const boardOpen = new Set();
 function renderBoard() {
   if (!document.body.classList.contains('view-board')) return;
@@ -1314,7 +1341,7 @@ const isPhone = () => matchMedia('(max-width: 760px)').matches;
 function setTab(t) {
   // chat / preview need a project: without one stay on the board and say why
   if (t !== 'projects' && !current) { t = 'projects'; setTimeout(() => alert('先在看板上点一个想法，或者点「＋ 新想法」新建一个'), 0); }
-  document.body.classList.remove('m-projects', 'm-chat', 'm-preview');
+  document.body.classList.remove('m-projects', 'm-chat', 'm-preview', 'view-new');
   document.body.classList.add('m-' + t);
   if (t === 'projects') { document.body.classList.add('view-board'); renderBoard(); }
   if (t === 'chat') { const box = $('#messages'); box.scrollTop = box.scrollHeight; }

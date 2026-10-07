@@ -18,7 +18,7 @@ button.primary { background: var(--brand); border-color: var(--brand); color: #f
 button.danger { color: var(--danger); } button:disabled { opacity: .5; cursor: default; }
 button.primary.stop { background: var(--danger); border-color: var(--danger); }
 .msg.user.interjection { border-left: 3px solid var(--warn); }
-.wide { margin: 6px 14px; } .actions { display: flex; gap: 6px; flex: none; } .actions button, .actions .btn { white-space: nowrap; padding: 6px 10px; }
+.wide { margin: 6px 14px; } .actions { display: flex; gap: 6px; flex: none; margin-left: auto; } .actions button, .actions .btn { white-space: nowrap; padding: 6px 10px; }
 .plist { list-style: none; margin: 8px 0; padding: 0 8px; overflow: auto; }
 .plist li { padding: 8px 10px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
 .plist li:hover { background: var(--panel); } .plist li.active { background: #1f2637; }
@@ -80,6 +80,8 @@ details.reasoning summary { cursor: pointer; } details.reasoning pre { white-spa
 /* project stopped: hide preview pane */
 body.no-preview { grid-template-columns: var(--sb) 1fr; } body.no-preview #preview { display: none; }
 #btnToggle.start { color: var(--ok); }
+#chat > header { flex-wrap: wrap; row-gap: 6px; } .phead { min-width: 0; flex: 1 1 160px; } #pMeta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; } .phead .pname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; } #btnBoard { white-space: nowrap; flex: none; }
+.pmeta-row { gap: 8px; flex-wrap: nowrap; } #btnToggle { padding: 0 8px; font-size: 12px; line-height: 20px; white-space: nowrap; }
 
 .gh-link { display: flex; align-items: center; gap: 8px; color: var(--muted); margin-top: 0; margin-bottom: 12px; }
 .gh-link:hover { color: var(--ink); background: var(--panel); }
@@ -266,10 +268,10 @@ body.view-board #chat, body.view-board #preview { display: none !important; } bo
 .bi-ex { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; }
 .bi-ex .ex { text-align: left; display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; color: var(--ink); cursor: pointer; }
 .bi-ex .ex:hover { border-color: var(--brand); } .bi-ex .i { grid-row: span 2; font-size: 22px; } .bi-ex .tag { font-size: 12px; color: var(--muted); } .bi-ex .t { font-size: 13px; line-height: 1.45; }
-.np-examples { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: -4px; }
+.np-examples { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; justify-content: center; }
 .np-examples .chip { background: var(--bg); border: 1px solid var(--line); color: var(--ink); border-radius: 999px; padding: 2px 10px; font-size: 12px; cursor: pointer; } .np-examples .chip:hover { border-color: var(--brand); }
 /* business users don't need ports, tokens, start/stop, logs: shown only with "显示技术细节" */
-body:not(.dev) #tokenStats, body:not(.dev) #usage, body:not(.dev) #btnToggle, body:not(.dev) #btnRestart,
+body:not(.dev) #tokenStats, body:not(.dev) #usage, body:not(.dev) #btnRestart,
 body:not(.dev) #btnLogs, body:not(.dev) #btnFiles, body:not(.dev) .dev-only, body:not(.dev) .plist .port { display: none !important; }
 .msg.assistant:not(.live) { white-space: normal; }
 .msg.assistant p { margin: 0 0 6px; } .msg.assistant .mh { font-weight: 700; margin: 10px 0 4px; } .msg.assistant .mh1, .msg.assistant .mh2 { font-size: 15px; }
@@ -325,3 +327,29 @@ table.cmp .sim { color: #a78bfa; }
 /* plan dialog: the confirm buttons stay reachable while scrolling a long plan */
 #npStep2 > .row.end { position: sticky; bottom: -20px; background: var(--panel); padding: 10px 0; z-index: 2; border-top: 1px solid var(--line); }
 .tag-bug { background: rgba(245,158,11,.16); color: #f59e0b; border-radius: 6px; padding: 0 6px; font-size: 12px; }
+
+/* ---------- new idea: "new conversation" entry ---------- */
+#newIdea { grid-column: 2 / -1; display: none; flex-direction: column; min-width: 0; min-height: 0; overflow: auto; background: radial-gradient(900px 420px at 50% 0%, rgba(91,141,239,.10), transparent 65%), var(--bg); }
+body.view-new #chat, body.view-new #preview, body.view-new #board { display: none !important; } body.view-new #newIdea { display: flex; }
+.ni-top { padding: 12px 14px; }
+.ni-center { flex: 1; width: min(720px, 100%); margin: 0 auto; padding: 0 20px 12vh; display: flex; flex-direction: column; justify-content: center; align-items: stretch; gap: 14px; }
+.ni-title { margin: 0; font-size: 28px; font-weight: 600; text-align: center; letter-spacing: .5px; }
+.ni-sub { text-align: center; margin-top: -6px; }
+.ni-box { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 14px 14px 10px; box-shadow: 0 12px 40px rgba(0,0,0,.35); transition: border-color .15s, box-shadow .15s; }
+.ni-box:focus-within { border-color: #3d5488; box-shadow: 0 12px 40px rgba(0,0,0,.35), 0 0 0 3px rgba(91,141,239,.12); }
+.ni-box textarea { width: 100%; min-height: 72px; max-height: 320px; resize: none; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 15px; line-height: 1.6; padding: 2px 4px; }
+.ni-box textarea::placeholder { color: #5d667c; }
+.ni-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
+.ni-modes { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+.ni-mode { border-radius: 999px; padding: 4px 12px; font-size: 12px; color: var(--muted); background: transparent; border-color: transparent; }
+.ni-mode:hover:not(:disabled) { color: var(--ink); background: var(--bg); }
+.ni-mode.on { color: var(--ink); background: rgba(91,141,239,.14); border-color: rgba(91,141,239,.45); }
+.ni-modes select { font: inherit; font-size: 12px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+.ni-send { width: 34px; height: 34px; padding: 0; border-radius: 50%; font-size: 17px; font-weight: 700; flex: none; display: grid; place-items: center; }
+.ni-status:empty { display: none; } .ni-status { text-align: center; }
+.ni-hint { text-align: center; }
+@media (max-width: 760px) {
+  body.view-new #newIdea { position: fixed; inset: 0 0 calc(56px + env(safe-area-inset-bottom)) 0; z-index: 20; }
+  body.view-new #sidebar { display: none !important; }
+  .ni-title { font-size: 22px; } .ni-center { padding: 0 12px 8vh; }
+}
