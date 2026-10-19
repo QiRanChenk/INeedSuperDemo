@@ -5,7 +5,8 @@ import { status, start } from './runner.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { DATA_DIR } from './config.js';
+import { serverSecret, getSettings } from './config.js';
+import { stripSessionCookie } from './auth.js';
 import { recordClientError } from './weberrors.js';
 import { resolveShare, recordView, recordEvent } from './shares.js';
 import { feedbackScript } from './feedback-widget.js';
@@ -38,14 +39,6 @@ export function proxyMiddleware(req, res) {
 // Demos are served from a second port (another origin), so nothing a demo page runs can reach the shell's window,
 // storage or same-origin API. The owner's preview there is unlocked by a per-project key (HMAC of a server secret),
 // passed once in the URL and then kept in a cookie scoped to /p/<id>/.
-let secret = null;
-function serverSecret() {
-  if (secret) return secret;
-  const f = path.join(DATA_DIR, '.secret');
-  try { secret = fs.readFileSync(f, 'utf8').trim(); } catch {}
-  if (!secret) { secret = crypto.randomBytes(32).toString('hex'); fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(f, secret, { mode: 0o600 }); }
-  return secret;
-}
 export const previewKey = id => crypto.createHmac('sha256', serverSecret()).update('preview:' + id).digest('base64url').slice(0, 24);
 const keyOk = (id, k) => { const want = Buffer.from(previewKey(id)), got = Buffer.from(String(k || '')); return got.length === want.length && crypto.timingSafeEqual(got, want); };
 
@@ -115,28 +108,53 @@ export function shareMiddleware(req, res) {
   // anonymous visitor id (cookie scoped to this link) for unique-visitor stats
   const cookieName = 'sdv';
   const existing = /(?:^|;\s*)sdv=([A-Za-z0-9_-]{8,32})/.exec(req.headers.cookie || '')?.[1];
-  const visitor = existing || crypto.randomBytes(9).toString('base64url');
-  forward(req, res, project, m[2], {
+  // ?_sdmv=<id>: the visitor just moved over from the relay address (直连) — same visitor, the view is already counted
+  const moved = /[?&]_sdmv=([A-Za-z0-9_-]{8,32})/.exec(m[2])?.[1];
+  const adopted = !self && !existing ? moved : undefined;
+  const visitor = existing || adopted || crypto.randomBytes(9).toString('base64url');
+  const rest = moved ? m[2].replace(/([?&])_sdmv=[^&#]*&?/, '$1').replace(/[?&](?=#|$)/, '') : m[2];
+  forward(req, res, project, rest, {
     prefix: `/s/${m[1]}`,
-    inject: visitorInjection(share, m[1]),
+    inject: visitorInjection(share, m[1], req, self ? '' : visitor),
     onPage: () => {
       if (self) return;
-      recordView(share.token, visitor, m[2].split('?')[0]);
+      if (!adopted) recordView(share.token, visitor, rest.split('?')[0]);
       if (!existing) res.appendHeader('set-cookie', `${cookieName}=${visitor}; Path=/s/${m[1]}/; Max-Age=31536000; SameSite=Lax; HttpOnly`);
     },
   });
 }
 
-/** Scripts for share-link visitors: feedback button, (optional) demo tour card, time-on-page beacon. */
-function visitorInjection(share, token) {
+/** Scripts for share-link visitors: 直连 switch, feedback button, (optional) demo tour card, time-on-page beacon. */
+function visitorInjection(share, token, req, visitor) {
   const tour = getTour(share.projectId);
   const withTour = tour?.enabled && tour.steps.length;
+  const direct = directSwitch(req);
   return html => {
     let out = share.feedback !== false ? injectFeedback(html, token, readProject(share.projectId)?.plan?.signals || []) : html;
     if (withTour) out = appendScript(out, tourScript(tour, token));
-    return appendScript(out, pingScript(token));
+    out = appendScript(out, pingScript(token));
+    return direct ? prependScript(out, directScript(direct.relay, direct.direct, visitor)) : out;
   };
 }
+
+/**
+ * 直连 on share pages: served on the relay demo address (SUPERDEMO_DEMO_PUBLIC_URL) while a direct one
+ * (SUPERDEMO_DEMO_DIRECT_URL) is set -> { relay, direct } origins, else null. Links handed out keep the relay address.
+ */
+export function directSwitch(req) {
+  const s = getSettings();
+  if (!s.demoUrl || !s.demoDirectUrl) return null;
+  const relay = new URL(s.demoUrl), direct = new URL(s.demoDirectUrl);
+  if (relay.origin === direct.origin) return null;
+  const host = String(req?.headers?.['x-forwarded-host'] || req?.headers?.host || '').split(',')[0].trim().toLowerCase().replace(/:\d+$/, '');
+  return host === relay.hostname.toLowerCase() ? { relay: relay.origin, direct: direct.origin } : null;
+}
+/** Moves a top-level page to the direct address (same path) when the browser can reach it; ?relay keeps the relay for the tab. */
+export function directScript(relay, direct, visitor = '') {
+  return `(function(){try{var R=${JSON.stringify(relay)},D=${JSON.stringify(direct)},V=${JSON.stringify(visitor)};if(location.origin!==R||window.top!==window)return;var q=location.search;if(/[?&]relay(=|&|$)/.test(q))sessionStorage.setItem('sd.relay','1');if(sessionStorage.getItem('sd.relay'))return;
+fetch(D+'/__sd/ping',{mode:'no-cors',cache:'no-store',signal:AbortSignal.timeout(1500)}).then(function(){q=q.replace(/([?&])_sdmv=[^&]*&?/,'$1').replace(/[?&]$/,'');if(V)q+=(q?'&':'?')+'_sdmv='+V;location.replace(D+location.pathname+q+location.hash);},function(){});}catch(e){}})();`;
+}
+const prependScript = (html, js) => { const tag = `<script>${js}</script>`, m = html.match(/<head[^>]*>/i); return m ? html.slice(0, m.index + m[0].length) + tag + html.slice(m.index + m[0].length) : tag + html; };
 const appendScript = (html, js) => { const i = html.search(/<\/body>/i), tag = `<script>${js}</script>`; return i >= 0 ? html.slice(0, i) + tag + html.slice(i) : html + tag; };
 
 // Anonymous visitors' writes are buffered and screened before they reach the demo: markup in their input could become
@@ -237,6 +255,7 @@ function forward(req, res, project, rest, { prefix, inject, onPage, body }) {
   if (body) { headers['content-length'] = String(body.length); delete headers['transfer-encoding']; }
   delete headers['accept-encoding']; // keep HTML uncompressed so scripts can be injected
   delete headers.authorization;      // the shell's credentials are not the project's business
+  headers.cookie = stripSessionCookie(headers.cookie); if (!headers.cookie) delete headers.cookie; // nor its session (host:port setups share cookies across ports)
   const upstream = http.request({ host: '127.0.0.1', port: project.port, method: req.method, path: rest, headers }, up => {
     const isHtml = /text\/html/i.test(up.headers['content-type'] || '') && req.method === 'GET';
     const page = isHtml && up.statusCode < 400;
@@ -287,6 +306,7 @@ export function proxyUpgrade(req, socket, head, target = upgradeTarget(req.url))
     for (let i = 0; i < req.rawHeaders.length; i += 2) {
       const k = req.rawHeaders[i];
       if (/^host$/i.test(k)) lines.push(`Host: 127.0.0.1:${project.port}`);
+      else if (/^cookie$/i.test(k)) { const c = stripSessionCookie(req.rawHeaders[i + 1]); if (c) lines.push(`${k}: ${c}`); }
       else if (!/^authorization$/i.test(k)) lines.push(`${k}: ${req.rawHeaders[i + 1]}`);
     }
     up.write(lines.join('\r\n') + '\r\n\r\n');

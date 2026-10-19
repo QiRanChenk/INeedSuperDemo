@@ -22,7 +22,7 @@ import { summary as usageLogSummary, readLog, backfillIfNeeded } from './usagelo
 import { turnLabel, listSessions, createSession, renameSession, deleteSession, setCurrentSession, loadHistory, clearHistory, lastChatAt, appendHistory } from './sessions.js';
 import { zipProject, dockerInfo, imageInfo, buildImage, isBuilding, saveImage, runHints } from './export.js';
 import zlib from 'node:zlib';
-import { authMiddleware, checkRequest, startupProblem, HOST, isLoopbackHost, passwordEnabled } from './auth.js';
+import { authMiddleware, authRouter, checkRequest, startupProblem, HOST, isLoopbackHost, passwordEnabled, oidcConfig } from './auth.js';
 import { listSnapshots, restoreSnapshot } from './snapshots.js';
 
 const app = express();
@@ -31,9 +31,24 @@ const PORT = Number(process.env.PORT || 3000);
 const DEMO_PORT = Number(process.env.SUPERDEMO_DEMO_PORT || PORT + 1);
 const DEMO_PUBLIC_PORT = Number(process.env.SUPERDEMO_DEMO_PUBLIC_PORT || DEMO_PORT); // as seen from browsers (Docker port mapping)
 
-// share links on the shell's own origin: forwarded to the demo origin once its public address is known
-app.use('/s', (req, res, next) => { const d = getSettings().demoUrl; if (d) return res.redirect(302, d + req.originalUrl); next(); });
+app.disable('x-powered-by');
+// behind the edge nginx: X-Forwarded-Proto / X-Real-IP are trusted (secure cookies, redirect URI, login rate limit)
+if (process.env.SUPERDEMO_TRUST_PROXY === '1') app.set('trust proxy', 'loopback, linklocal, uniquelocal');
+
+// share links on the shell's own origin: forwarded to the demo origin once its address is known (the direct one when
+// this request came in on the shell's direct address)
+app.use('/s', (req, res, next) => {
+  const s = getSettings(), host = String(req.headers.host || '').toLowerCase().replace(/:\d+$/, '');
+  const onDirect = s.directUrl && s.demoDirectUrl && new URL(s.directUrl).hostname.toLowerCase() === host;
+  const d = onDirect ? s.demoDirectUrl : s.demoUrl;
+  if (d) return res.redirect(302, d + req.originalUrl);
+  next();
+});
 app.use('/s', shareMiddleware); // share links: public by design, before access control
+// 直连: the shell's direct (IPv6, no relay) address; the UI moves there when the browser can reach it
+app.get('/api/direct', (req, res) => { res.setHeader('cache-control', 'no-store'); res.json({ url: getSettings().directUrl || '' }); });
+app.get('/boot.js', (req, res) => res.sendFile(path.join(ROOT, 'shell', 'ui', 'boot.js'))); // the login page needs it too
+app.use(authRouter()); // login page, 统一登录 (OIDC) and the password fallback
 app.use(authMiddleware);
 app.use('/p', proxyMiddleware);
 app.use(express.json({ limit: '5mb' }));
@@ -80,8 +95,8 @@ app.put('/api/settings', wrap(async (req, res) => {
   if (['auto', 'on', 'off'].includes(vision)) patch.vision = vision;
   if (['on', 'off'].includes(agentThinking)) patch.agentThinking = agentThinking;
   if (notifyWebhook !== undefined) { const u = String(notifyWebhook).trim(); if (u && !/^https:\/\/[^\s]+$/.test(u)) return res.status(400).json({ error: '机器人地址要以 https:// 开头（企业微信 / 飞书 / 钉钉群机器人的 Webhook 地址）' }); patch.notifyWebhook = u; }
-  if (demoUrl !== undefined) { const u = normPublicUrl(demoUrl); if (String(demoUrl).trim() && !u) return res.status(400).json({ error: 'Demo 地址要以 http:// 或 https:// 开头，如 https://demo.example.com:8789' }); patch.demoUrl = u; }
-  if (publicUrl !== undefined) { const u = normPublicUrl(publicUrl); if (String(publicUrl).trim() && !u) return res.status(400).json({ error: '分享地址要以 http:// 或 https:// 开头，如 https://demo.example.com' }); patch.publicUrl = u; }
+  if (demoUrl !== undefined && !getSettings().urlsLocked.demoUrl) { const u = normPublicUrl(demoUrl); if (String(demoUrl).trim() && !u) return res.status(400).json({ error: 'Demo 地址要以 http:// 或 https:// 开头，如 https://demo.example.com:8789' }); patch.demoUrl = u; }
+  if (publicUrl !== undefined && !getSettings().urlsLocked.publicUrl) { const u = normPublicUrl(publicUrl); if (String(publicUrl).trim() && !u) return res.status(400).json({ error: '分享地址要以 http:// 或 https:// 开头，如 https://demo.example.com' }); patch.publicUrl = u; }
   // model / endpoint / vision mode changed -> image support has to be detected again
   const cur = getSettings();
   if ((patch.vision && patch.vision !== cur.vision) || (patch.model && patch.model !== cur.model) || (patch.baseUrl && patch.baseUrl !== cur.baseUrl)) { patch.visionOk = null; patch.visionError = ''; }
@@ -419,7 +434,9 @@ async function boot() {
   setInterval(() => runDigest().catch(e => console.warn('[digest]', e.message)), 10 * 60_000).unref();
   const server = app.listen(PORT, HOST, () => {
     const s = getSettings();
-    console.log(`\n  SuperDemo 壳已启动:  http://${isLoopbackHost(HOST) ? 'localhost' : HOST}:${PORT}${passwordEnabled() ? '  (已启用访问口令)' : ''}`);
+    console.log(`\n  SuperDemo 壳已启动:  http://${isLoopbackHost(HOST) ? 'localhost' : HOST}:${PORT}${[oidcConfig() && '统一登录', passwordEnabled() && '访问口令'].filter(Boolean).map(x => `  (已启用${x})`).join('')}`);
+    if (s.publicUrl || s.directUrl) console.log(`  地址: ${[s.publicUrl, s.directUrl && `直连 ${s.directUrl}`].filter(Boolean).join('  ')}`);
+    if (s.demoUrl || s.demoDirectUrl) console.log(`  Demo 地址: ${[s.demoUrl, s.demoDirectUrl && `直连 ${s.demoDirectUrl}`].filter(Boolean).join('  ')}`);
     console.log(`  LLM: ${s.baseUrl || '(未配置)'}  model=${s.model || '(未配置)'}  key=${s.apiKey ? maskKey(s.apiKey) : '(未配置)'}`);
     console.log(`  项目: ${projects.length} 个\n`);
   });

@@ -14,8 +14,21 @@ services:
       HOST: 0.0.0.0
       SUPERDEMO_DEMO_PORT: 3001
       SUPERDEMO_DEMO_PUBLIC_PORT: ${DEMO_HOST_PORT:-18789}
-      # Required when listening beyond loopback: the agent can run commands. Browser login, any username.
-      SUPERDEMO_PASSWORD: ${SUPERDEMO_PASSWORD:?set SUPERDEMO_PASSWORD in .env}
+      # A sign-in method is required when listening beyond loopback (the agent can run commands):
+      # 统一登录 (Casdoor OIDC) and/or the shared access password (fallback, rate-limited).
+      SUPERDEMO_PASSWORD: ${SUPERDEMO_PASSWORD:-}
+      SUPERDEMO_OIDC_ISSUER: ${SUPERDEMO_OIDC_ISSUER:-}
+      SUPERDEMO_OIDC_CLIENT_ID: ${SUPERDEMO_OIDC_CLIENT_ID:-}
+      SUPERDEMO_OIDC_CLIENT_SECRET: ${SUPERDEMO_OIDC_CLIENT_SECRET:-}
+      SUPERDEMO_OIDC_INTERNAL_URL: ${SUPERDEMO_OIDC_INTERNAL_URL:-}
+      SUPERDEMO_OIDC_ORGANIZATION: ${SUPERDEMO_OIDC_ORGANIZATION:-}
+      SUPERDEMO_APP_ORIGINS: ${SUPERDEMO_APP_ORIGINS:-}
+      SUPERDEMO_TRUST_PROXY: ${SUPERDEMO_TRUST_PROXY:-}
+      # addresses (relay / direct) of the shell and of the demo origin; empty = old "this host + demo port" behaviour
+      SUPERDEMO_PUBLIC_URL: ${SUPERDEMO_PUBLIC_URL:-}
+      SUPERDEMO_DEMO_PUBLIC_URL: ${SUPERDEMO_DEMO_PUBLIC_URL:-}
+      SUPERDEMO_DIRECT_URL: ${SUPERDEMO_DIRECT_URL:-}
+      SUPERDEMO_DEMO_DIRECT_URL: ${SUPERDEMO_DEMO_DIRECT_URL:-}
       TZ: Asia/Shanghai
     volumes:
       - ./data:/app/data           # settings (model / API key), token usage log

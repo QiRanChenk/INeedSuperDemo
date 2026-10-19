@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>登录 · SuperDemo</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E⚡%3C/text%3E%3C/svg%3E">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #0f1117; color: #c9d1d9; font: 14px/1.6 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .card { width: min(360px, calc(100vw - 32px)); background: #161b22; border: 1px solid #262c36; border-radius: 14px; padding: 28px 24px; }
+  h1 { margin: 0 0 4px; font-size: 20px; color: #e6edf3; }
+  .sub { margin: 0 0 22px; color: #8b949e; font-size: 13px; }
+  button, input { font: inherit; width: 100%; border-radius: 8px; padding: 10px 12px; }
+  .primary { background: #2f81f7; color: #fff; border: 0; cursor: pointer; font-weight: 600; }
+  .primary:hover { background: #4493f8; }
+  .ghost { background: transparent; color: #c9d1d9; border: 1px solid #30363d; cursor: pointer; }
+  .ghost:hover { background: #1f2630; }
+  input { background: #0d1117; color: #e6edf3; border: 1px solid #30363d; margin-bottom: 10px; }
+  input:focus { outline: 2px solid #2f81f7; outline-offset: -1px; }
+  .or { display: flex; align-items: center; gap: 10px; color: #6e7681; font-size: 12px; margin: 18px 0 14px; }
+  .or::before, .or::after { content: ""; flex: 1; border-top: 1px solid #262c36; }
+  .msg { min-height: 20px; margin: 10px 0 0; font-size: 13px; color: #f85149; }
+  .msg.info { color: #8b949e; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main class="card">
+  <h1>⚡ SuperDemo</h1>
+  <p class="sub">想法验证 · 请先登录</p>
+  <div id="loading" class="msg info">正在检查登录方式…</div>
+  <button id="sso" class="primary" type="button" hidden>用统一账号登录</button>
+  <div id="or" class="or" hidden>或</div>
+  <form id="pw" hidden autocomplete="on">
+    <input id="password" type="password" name="password" placeholder="访问口令" autocomplete="current-password" required>
+    <button class="ghost" type="submit">用访问口令登录</button>
+  </form>
+  <p id="msg" class="msg" role="alert"></p>
+</main>
+<script src="/boot.js"></script>
+<script>
+(async () => {
+  if (await window.sdDirect) return; // moving to the direct address; sign in there (cookies are per host)
+  const q = new URLSearchParams(location.search);
+  const next = (q.get('next') || '/').startsWith('/') && !(q.get('next') || '').startsWith('//') ? q.get('next') || '/' : '/';
+  const $ = id => document.getElementById(id);
+  const say = (t, info) => { $('msg').textContent = t; $('msg').className = 'msg' + (info ? ' info' : ''); };
+  const ERRORS = {
+    failed: '统一登录没有成功，请再试一次（或用访问口令登录）。',
+    expired: '登录超时或被打断了，请再点一次。',
+    no_account: '这个统一账号不能使用本系统。',
+    disabled: '这个统一账号已被停用。',
+    not_configured: '统一登录还没有配置。',
+  };
+  let me;
+  try { me = await (await fetch('/auth/me', { cache: 'no-store' })).json(); } catch { $('loading').textContent = '连不上服务器，请稍后刷新。'; return; }
+  if (me.authenticated) { location.replace(next); return; }
+  $('loading').hidden = true;
+  const err = q.get('oidc_error');
+  if (err) say(ERRORS[err] || ERRORS.failed);
+  else if (q.has('signed_out')) say('已退出。', true);
+  const goSso = () => { localStorage.setItem('sd.login', 'oidc'); location.href = '/auth/oidc/login?next=' + encodeURIComponent(next); };
+  if (me.methods.oidc) {
+    $('sso').hidden = false; $('sso').onclick = goSso;
+    // signed in with the 统一账号 last time: go straight back (the IdP session usually still holds, so this is
+    // seamless) — at most once a minute, so a broken IdP can never cause a redirect loop
+    const last = Number(localStorage.getItem('sd.autoAt') || 0);
+    if (!err && !q.has('signed_out') && localStorage.getItem('sd.login') === 'oidc' && Date.now() - last > 60_000) {
+      localStorage.setItem('sd.autoAt', String(Date.now()));
+      say('正在用统一账号登录…', true);
+      return goSso();
+    }
+  }
+  if (me.methods.password) {
+    $('pw').hidden = false; $('or').hidden = !me.methods.oidc;
+    if (!me.methods.oidc) $('password').focus();
+    $('pw').onsubmit = async e => {
+      e.preventDefault();
+      const btn = $('pw').querySelector('button'); btn.disabled = true; say('');
+      try {
+        const r = await fetch('/auth/password', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: $('password').value, next }) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) { say(j.error || '登录失败'); $('password').select(); return; }
+        localStorage.setItem('sd.login', 'password');
+        location.replace(j.next || '/');
+      } catch { say('连不上服务器，请稍后再试。'); }
+      finally { btn.disabled = false; }
+    };
+  }
+  if (!me.methods.oidc && !me.methods.password) say('没有可用的登录方式。');
+})();
+</script>
+</body>
+</html>

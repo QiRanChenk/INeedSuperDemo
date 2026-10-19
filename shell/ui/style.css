@@ -353,3 +353,5 @@ body.view-new #chat, body.view-new #preview, body.view-new #board { display: non
   body.view-new #sidebar { display: none !important; }
   .ni-title { font-size: 22px; } .ni-center { padding: 0 12px 8vh; }
 }
+.who-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 4px 6px; }
+.who-row #whoName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

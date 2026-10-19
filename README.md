@@ -67,7 +67,7 @@ SuperDemo 可以让 AI 在本机执行命令，因此：
 
 - 默认只监听 `127.0.0.1`。要让局域网 / 公网访问，必须同时设置访问口令，否则拒绝启动：
   ```bash
-  HOST=0.0.0.0 SUPERDEMO_PASSWORD='一个足够长的随机口令' npm start   # 浏览器弹出登录框，用户名随意
+  HOST=0.0.0.0 SUPERDEMO_PASSWORD='一个足够长的随机口令' npm start   # 打开后是登录页；也可配统一登录（OIDC，见 .env.example）
   ```
 - **Demo 运行在独立的源上**：预览和分享链接由第二个端口提供（默认主端口 + 1，可用 `SUPERDEMO_DEMO_PORT` 指定），Demo 页面里的任何脚本都碰不到 SuperDemo 的页面、凭据和接口；AI 查看和操作页面通过注入到 Demo 里的脚本 + `postMessage` 完成，每个项目有自己的预览密钥。SuperDemo 拒绝浏览器标记为非同源的写请求。
 - 分享链接的访客匿名、无需口令，只能使用那一个 Demo；他们提交的内容里不能带网页代码（防止存储型 XSS），反馈有频率限制，留言交给 AI 时只作为数据、不作为指令。
@@ -76,7 +76,7 @@ SuperDemo 可以让 AI 在本机执行命令，因此：
 ## 部署到服务器 / NAS
 
 ```bash
-cp .env.example .env    # 填 SUPERDEMO_PASSWORD（必填）；可选 HOST_PORT（默认 18788）、DEMO_HOST_PORT（默认 18789）
+cp .env.example .env    # 填登录方式：SUPERDEMO_PASSWORD 和/或统一登录 SUPERDEMO_OIDC_*（至少一种）；可选 HOST_PORT（默认 18788）、DEMO_HOST_PORT（默认 18789）
 docker compose up -d --build
 ```
 

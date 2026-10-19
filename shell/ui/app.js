@@ -466,6 +466,10 @@ async function loadSettings() {
   $('#stVision').value = settings.vision || 'auto';
   $('#stPublic').value = settings.publicUrl || '';
   $('#stDemoUrl').value = settings.demoUrl || ''; $('#stDemoPort').textContent = settings.demoPort || '';
+  // set on the server (environment): shown, not editable here
+  const lockNote = '由服务器配置（环境变量）决定，这里不能改';
+  for (const [id, k] of [['#stPublic', 'publicUrl'], ['#stDemoUrl', 'demoUrl']]) { $(id).disabled = !!settings.urlsLocked?.[k]; $(id).title = settings.urlsLocked?.[k] ? lockNote : ''; }
+  for (const [id, v] of [['#stPublicDirect', settings.directUrl], ['#stDemoDirect', settings.demoDirectUrl]]) { $(id).hidden = !v; $(id).textContent = v ? `直连地址：${v}（浏览器能直接访问时自动切过去；发给别人的链接仍用上面的公网地址）` : ''; }
   $('#stNotify').value = settings.notifyWebhook || '';
   $('#stVisionState').textContent = settings.vision === 'auto' ? (settings.visionOk === true ? '已检测：当前模型支持图片' : settings.visionOk === false ? `已检测：当前模型不支持图片，只发送页面结构文本${settings.visionError ? `（${settings.visionError.slice(0, 120)}）` : ''}；如判断有误，把上面切到「总是发送」或重新保存即可重新检测` : '尚未检测（AI 第一次查看页面时自动判断）') : '';
   // project-side LLM
@@ -503,7 +507,7 @@ function toggleSettings(open) {
 $('#stNotifyTest').onclick = async () => { const r = $('#stResult'); r.textContent = '发送中…'; try { await api('/api/settings/notify-test', { method: 'POST', body: { url: $('#stNotify').value } }); r.textContent = '✓ 测试消息已发出，去群里看看'; } catch (e) { r.textContent = '✗ ' + e.message; } };
 $('#stDev').onchange = e => { setDev(e.target.checked); renderHeader(); };
 async function saveSettings() {
-  const body = { baseUrl: $('#stBase').value, model: $('#stModel').value, temperature: $('#stTemp').value, maxIterations: $('#stIter').value, contextWindow: $('#stCtx').value, stream: $('#stStream').checked, vision: $('#stVision').value, publicUrl: $('#stPublic').value, demoUrl: $('#stDemoUrl').value, notifyWebhook: $('#stNotify').value, projectLlm: collectProjectLlm() };
+  const body = { baseUrl: $('#stBase').value, model: $('#stModel').value, temperature: $('#stTemp').value, maxIterations: $('#stIter').value, contextWindow: $('#stCtx').value, stream: $('#stStream').checked, vision: $('#stVision').value, ...(settings.urlsLocked?.publicUrl ? {} : { publicUrl: $('#stPublic').value }), ...(settings.urlsLocked?.demoUrl ? {} : { demoUrl: $('#stDemoUrl').value }), notifyWebhook: $('#stNotify').value, projectLlm: collectProjectLlm() };
   if ($('#stKey').value) body.apiKey = $('#stKey').value;
   const saved = await api('/api/settings', { method: 'PUT', body });
   await loadSettings();
@@ -877,7 +881,8 @@ async function openShare() {
     li.querySelector('.surl').textContent = shareUrl(s.token);
     li.querySelector('.small').textContent = [s.label, state, `打开 ${s.views || 0} 次`, s.lastViewAt ? `最近 ${new Date(s.lastViewAt).toLocaleString()}` : ''].filter(Boolean).join(' · ');
     if (s.active) {
-      if (li.querySelector('.open')) li.querySelector('.open').href = `${settings?.demoUrl || PageBot.origin() || ''}/s/${s.token}/?_sdself=${current.previewKey}`; // the owner's own look is not a visit
+      // the owner's own look is not a visit; opened on the demo origin this tab uses (the direct one on the direct address)
+      if (li.querySelector('.open')) li.querySelector('.open').href = `${PageBot.origin() || settings?.demoUrl || ''}/s/${s.token}/?_sdself=${current.previewKey}`;
       li.querySelector('.copy').onclick = async e => { e.target.textContent = await copyText(shareUrl(s.token)) ? '已复制' : '复制失败'; };
       li.querySelector('.off').onclick = async () => { if (!confirm('停用后这个链接立即失效，拿到链接的人将打不开，确定？')) return; await api(`/api/projects/${id}/shares/${s.token}`, { method: 'DELETE' }); openShare(); };
     }
@@ -1361,7 +1366,28 @@ setSidebar(localStorage.getItem('sbCollapsed') === '1');
 $('#sbToggle').onclick = () => setSidebar(!document.body.classList.contains('sb-collapsed'));
 document.addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') { e.preventDefault(); setSidebar(!document.body.classList.contains('sb-collapsed')); } });
 
+// ---------- signed-in account ----------
+async function loadMe() {
+  try {
+    const me = await api('/auth/me');
+    if (!me.enabled) return;
+    $('#whoRow').hidden = false;
+    $('#whoName').textContent = me.via === 'oidc' ? me.name : '口令登录';
+    $('#whoName').title = me.via === 'oidc' ? `统一账号：${me.name}` : '用访问口令登录';
+  } catch {}
+}
+$('#btnLogout').onclick = async () => {
+  if (!confirm('退出登录？')) return;
+  try {
+    const r = await api('/auth/logout', { method: 'POST' });
+    localStorage.removeItem('sd.login'); // no automatic sign-in on the login page after this
+    location.href = r.sso ? '/auth/oidc/logout' : '/login?signed_out=1';
+  } catch (e) { alert('退出失败：' + e.message); }
+};
+
 (async () => {
+  if (await window.sdDirect) return; // moving to the direct address
+  loadMe();
   UsageDialog.refreshSummary();
   setInterval(() => UsageDialog.refreshSummary(), 60000);
   await loadSettings();

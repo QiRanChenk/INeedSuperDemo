@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,6 +31,16 @@ function loadDotEnv() {
   }
 }
 
+/** Per-installation secret (data/.secret): preview keys, session and login cookies are signed with it. */
+let secret = null;
+export function serverSecret() {
+  if (secret) return secret;
+  const f = path.join(DATA_DIR, '.secret');
+  try { secret = fs.readFileSync(f, 'utf8').trim(); } catch {}
+  if (!secret) { secret = crypto.randomBytes(32).toString('hex'); fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(f, secret, { mode: 0o600 }); }
+  return secret;
+}
+
 function readSettingsFile() {
   try { return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); } catch { return {}; }
 }
@@ -57,8 +68,17 @@ export function getSettings() {
     visionError: s.visionError || '', // provider message that switched screenshots off
     // address that share links use (domain / tunnel), when the owner reaches SuperDemo over a LAN address
     notifyWebhook: normPublicUrl(s.notifyWebhook ?? '') && /^https:/.test(s.notifyWebhook || '') ? String(s.notifyWebhook).trim() : '', // team-chat bot for new feedback
-    demoUrl: normPublicUrl(s.demoUrl ?? process.env.SUPERDEMO_DEMO_URL ?? ''), // public address of the demo port (previews + share links)
-    publicUrl: normPublicUrl(s.publicUrl ?? process.env.SUPERDEMO_PUBLIC_URL ?? ''),
+    // Addresses. Set in the environment they win over the UI (and the UI shows them locked):
+    //   publicUrl  SUPERDEMO_PUBLIC_URL       the shell via the cloud relay, e.g. https://demo.mmkj.site (links handed out)
+    //   demoUrl    SUPERDEMO_DEMO_PUBLIC_URL  the demo origin via the relay, e.g. https://demo-box.mmkj.site (share links)
+    //   directUrl / demoDirectUrl  SUPERDEMO_DIRECT_URL / SUPERDEMO_DEMO_DIRECT_URL: the same two reached directly (IPv6,
+    //   no relay); the UI moves there when the browser can reach it, and previews then use the direct demo origin.
+    // Nothing set: the old behaviour (demo origin = this host name + the demo port).
+    demoUrl: normPublicUrl(process.env.SUPERDEMO_DEMO_PUBLIC_URL || (s.demoUrl ?? process.env.SUPERDEMO_DEMO_URL ?? '')),
+    publicUrl: normPublicUrl(process.env.SUPERDEMO_PUBLIC_URL || (s.publicUrl ?? '')),
+    directUrl: normPublicUrl(process.env.SUPERDEMO_DIRECT_URL || ''),
+    demoDirectUrl: normPublicUrl(process.env.SUPERDEMO_DEMO_DIRECT_URL || ''),
+    urlsLocked: { publicUrl: !!normPublicUrl(process.env.SUPERDEMO_PUBLIC_URL), demoUrl: !!normPublicUrl(process.env.SUPERDEMO_DEMO_PUBLIC_URL) },
     // build agent reasoning: on = provider default (gateways often think by default), off = switch it off (much faster)
     agentThinking: ['on', 'off'].includes(s.agentThinking) ? s.agentThinking : 'on',
     // LLM used INSIDE generated projects (env SUPERDEMO_LLM_*). useShell=true -> same as the shell agent.
@@ -102,7 +122,7 @@ export function maskKey(key) {
 export const visionEnabled = s => s.vision === 'on' || (s.vision === 'auto' && s.visionOk !== false);
 
 // Shell secrets that must never reach project processes or agent shell commands (AI-written code could print them).
-const SECRET_ENV = ['SUPERDEMO_PASSWORD', 'SUPERDEMO_ALLOWED_HOSTS', 'LLM_API_KEY', 'LLM_BASE_URL', 'LLM_MODEL'];
+const SECRET_ENV = ['SUPERDEMO_PASSWORD', 'SUPERDEMO_ALLOWED_HOSTS', 'SUPERDEMO_OIDC_CLIENT_SECRET', 'SUPERDEMO_OIDC_CLIENT_ID', 'SUPERDEMO_OIDC_ISSUER', 'SUPERDEMO_OIDC_INTERNAL_URL', 'LLM_API_KEY', 'LLM_BASE_URL', 'LLM_MODEL'];
 /** process.env without shell secrets, for child processes. */
 export function childEnv(extra = {}) {
   const env = { ...process.env };
