@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { serverSecret, getSettings } from './config.js';
-import { stripSessionCookie } from './auth.js';
+import { stripSessionCookie, dropForbiddenSetCookies, isSecure } from './auth.js';
 import { recordClientError } from './weberrors.js';
 import { resolveShare, recordView, recordEvent } from './shares.js';
 import { feedbackScript } from './feedback-widget.js';
@@ -31,9 +31,22 @@ export function proxyMiddleware(req, res) {
   if (rest === undefined) return res.redirect(302, `/p/${id}/`);
   const project = readProject(id);
   if (!project) return res.status(404).send('project not found');
-  // legacy same-origin preview (used when the demo origin isn't reachable): same in-page bot, errors to the shell API
-  forward(req, res, project, rest, { prefix: `/p/${id}`, inject: html => injectBot(injectReporter(html, id, `/api/projects/${id}/client-errors`), previewKey(id)) });
+  // Demo code must never run on the shell's origin (it would call /api/* with the owner's session -> the agent -> RCE).
+  // A configured demo origin: go there (the owner is signed in here, so the preview key may come along).
+  const to = previewOrigin(req);
+  if (to) return res.redirect(302, `${to}/p/${id}${rest}${rest.includes('?') ? '&' : '?'}_sdk=${previewKey(id)}`);
+  // Legacy fallback (no demo origin reachable): served sandboxed — an opaque origin, so no shell cookies, storage or
+  // same-origin API calls (its writes carry Origin: null and are refused); the in-page bot still talks via postMessage.
+  forward(req, res, project, rest, { prefix: `/p/${id}`, sandbox: true, inject: html => injectBot(injectReporter(html, id, `/api/projects/${id}/client-errors`), previewKey(id)) });
 }
+/** The demo origin for a preview requested on the shell: the direct one when on the shell's direct address, else the public one. */
+export function previewOrigin(req) {
+  const s = getSettings(), host = String(req.headers.host || '').toLowerCase().replace(/:\d+$/, '');
+  let onDirect = false; try { onDirect = !!s.directUrl && new URL(s.directUrl).hostname.toLowerCase() === host; } catch {}
+  const u = onDirect && s.demoDirectUrl ? s.demoDirectUrl : s.demoUrl;
+  try { return u ? new URL(u).origin : ''; } catch { return ''; }
+}
+export const SANDBOX_CSP = "sandbox allow-scripts allow-forms allow-popups allow-modals; frame-ancestors 'self'";
 
 // ---------- demo origin ----------
 // Demos are served from a second port (another origin), so nothing a demo page runs can reach the shell's window,
@@ -52,7 +65,7 @@ export function demoPreview(req, res) {
   const fromCookie = /(?:^|;\s*)sdpk=([A-Za-z0-9_-]+)/.exec(req.headers.cookie || '')?.[1];
   if (!keyOk(id, fromUrl) && !keyOk(id, fromCookie)) return res.status(403).send(messagePage('需要从 SuperDemo 打开', '这是项目的预览地址，请在 SuperDemo 里打开它；要给别人看，请用「分享」生成链接。'));
   if (fromUrl) {
-    res.appendHeader('set-cookie', `sdpk=${fromUrl}; Path=/p/${id}/; HttpOnly; SameSite=Lax${req.headers['x-forwarded-proto'] === 'https' || req.secure ? '; Secure' : ''}`);
+    res.appendHeader('set-cookie', `sdpk=${fromUrl}; Path=/p/${id}/; HttpOnly; SameSite=Lax${isSecure(req) ? '; Secure' : ''}`);
     rest = rest.replace(/([?&])_sdk=[^&#]*&?/, '$1').replace(/[?&]$/, '');
   }
   if (rest === undefined) return res.redirect(302, `/p/${id}/`);
@@ -246,7 +259,7 @@ function handleFeedback(req, res, share) {
 }
 
 /** inject: true -> agent error reporter; a function html => html -> custom injection; false -> untouched. */
-function forward(req, res, project, rest, { prefix, inject, onPage, body }) {
+function forward(req, res, project, rest, { prefix, inject, onPage, body, sandbox }) {
   const st = status(project.id).status;
   if (st !== 'running' && st !== 'starting') {
     return res.status(503).send(waitingPage(project, st));
@@ -261,7 +274,7 @@ function forward(req, res, project, rest, { prefix, inject, onPage, body }) {
     const page = isHtml && up.statusCode < 400;
     if (!isHtml || !inject || up.headers['content-encoding']) {
       res.status(up.statusCode);
-      for (const [k, v] of Object.entries(up.headers)) if (v !== undefined) res.setHeader(k, v);
+      copyHeaders(up.headers, res, sandbox);
       if (page) onPage?.();
       return up.pipe(res);
     }
@@ -273,7 +286,7 @@ function forward(req, res, project, rest, { prefix, inject, onPage, body }) {
       res.status(up.statusCode);
       // the body was rewritten (scripts injected): its length is new, so drop the upstream framing headers -- sending
       // both content-length and transfer-encoding is invalid HTTP, and reverse proxies (nginx) answer 502 to it
-      for (const [k, v] of Object.entries(up.headers)) if (v !== undefined && !HOP.has(k)) res.setHeader(k, v);
+      copyHeaders(up.headers, res, sandbox, HOP);
       res.setHeader('content-length', Buffer.byteLength(html));
       if (page) onPage?.();
       res.end(html);
@@ -285,6 +298,17 @@ function forward(req, res, project, rest, { prefix, inject, onPage, body }) {
     else res.end();
   });
   if (body) upstream.end(body); else req.pipe(upstream);
+}
+
+/** Upstream response headers -> the response: no Set-Cookie that could plant the shell's cookies; sandbox when asked. */
+function copyHeaders(headers, res, sandbox, skip) {
+  for (const [k, v] of Object.entries(headers)) {
+    if (v === undefined || skip?.has(k)) continue;
+    if (k === 'set-cookie') { const c = dropForbiddenSetCookies(v); if (c) res.setHeader(k, c); continue; }
+    if (sandbox && k === 'content-security-policy') continue; // replaced below
+    res.setHeader(k, v);
+  }
+  if (sandbox) res.setHeader('content-security-policy', SANDBOX_CSP);
 }
 
 /** Project + upstream path for an upgrade request on /p/:id/… (shell access already checked) or /s/:token/…. */

@@ -1376,14 +1376,16 @@ async function loadMe() {
     $('#whoName').title = me.via === 'oidc' ? `统一账号：${me.name}` : '用访问口令登录';
   } catch {}
 }
-$('#btnLogout').onclick = async () => {
-  if (!confirm('退出登录？')) return;
+const logout = (url, question) => async () => {
+  if (!confirm(question)) return;
   try {
-    const r = await api('/auth/logout', { method: 'POST' });
+    const r = await api(url, { method: 'POST' });
     localStorage.removeItem('sd.login'); // no automatic sign-in on the login page after this
     location.href = r.sso ? '/auth/oidc/logout' : '/login?signed_out=1';
   } catch (e) { alert('退出失败：' + e.message); }
 };
+$('#btnLogout').onclick = logout('/auth/logout', '退出登录？');
+$('#btnLogoutAll').onclick = logout('/auth/logout-all', '让所有设备上的登录都失效（包括这台）？');
 
 (async () => {
   if (await window.sdDirect) return; // moving to the direct address

@@ -122,7 +122,7 @@ export function maskKey(key) {
 export const visionEnabled = s => s.vision === 'on' || (s.vision === 'auto' && s.visionOk !== false);
 
 // Shell secrets that must never reach project processes or agent shell commands (AI-written code could print them).
-const SECRET_ENV = ['SUPERDEMO_PASSWORD', 'SUPERDEMO_ALLOWED_HOSTS', 'SUPERDEMO_OIDC_CLIENT_SECRET', 'SUPERDEMO_OIDC_CLIENT_ID', 'SUPERDEMO_OIDC_ISSUER', 'SUPERDEMO_OIDC_INTERNAL_URL', 'LLM_API_KEY', 'LLM_BASE_URL', 'LLM_MODEL'];
+const SECRET_ENV = ['SUPERDEMO_PASSWORD', 'SUPERDEMO_ALLOWED_HOSTS', 'SUPERDEMO_OIDC_CLIENT_SECRET', 'SUPERDEMO_SESSION_SECRET', 'SUPERDEMO_OIDC_CLIENT_ID', 'SUPERDEMO_OIDC_ISSUER', 'SUPERDEMO_OIDC_INTERNAL_URL', 'LLM_API_KEY', 'LLM_BASE_URL', 'LLM_MODEL'];
 /** process.env without shell secrets, for child processes. */
 export function childEnv(extra = {}) {
   const env = { ...process.env };

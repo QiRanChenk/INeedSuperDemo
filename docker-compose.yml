@@ -24,6 +24,7 @@ services:
       SUPERDEMO_OIDC_ORGANIZATION: ${SUPERDEMO_OIDC_ORGANIZATION:-}
       SUPERDEMO_APP_ORIGINS: ${SUPERDEMO_APP_ORIGINS:-}
       SUPERDEMO_TRUST_PROXY: ${SUPERDEMO_TRUST_PROXY:-}
+      SUPERDEMO_SESSION_SECRET: ${SUPERDEMO_SESSION_SECRET:-}
       # addresses (relay / direct) of the shell and of the demo origin; empty = old "this host + demo port" behaviour
       SUPERDEMO_PUBLIC_URL: ${SUPERDEMO_PUBLIC_URL:-}
       SUPERDEMO_DEMO_PUBLIC_URL: ${SUPERDEMO_DEMO_PUBLIC_URL:-}

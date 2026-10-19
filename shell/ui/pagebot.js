@@ -75,7 +75,8 @@ const PageBot = (() => {
       const cleanup = () => { clearTimeout(t); waiting.delete(id); frame.removeEventListener('load', onLoad); };
       frame.addEventListener('load', onLoad);
       waiting.set(id, { frame, done: m => { cleanup(); m.ok ? resolve(m.result) : reject(new Error(m.error)); } });
-      let origin = '*'; try { origin = new URL(frame.src).origin; } catch {}
+      // the legacy same-origin fallback is served sandboxed (opaque origin): only '*' reaches it
+      let origin = '*'; try { if (demoBase) origin = new URL(frame.src).origin; } catch {}
       frame.contentWindow.postMessage({ sdBot: 1, k: keyOf(frame.dataset.project), id, op, ...payload }, origin);
     });
   }

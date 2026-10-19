@@ -14,7 +14,7 @@ import { recordClientError } from './weberrors.js';
 import { getPretest, runPretest, planWalks, continueWalk, pageList } from './personas.js';
 import { makePlan, normalizePlan, planToMessage } from './planner.js';
 import * as runner from './runner.js';
-import { proxyMiddleware, proxyUpgrade, shareMiddleware, upgradeTarget, demoPreview, demoUpgradeAllowed, previewKey } from './proxy.js';
+import { proxyMiddleware, proxyUpgrade, shareMiddleware, upgradeTarget, demoPreview, demoUpgradeAllowed, previewKey, previewOrigin } from './proxy.js';
 import { listShares, createShare, revokeShare, deleteSharesOf, setShareOptions, shareStats } from './shares.js';
 import { testConnection } from './llm.js';
 import { runAgent, attachRun, stopRun, interject, listQueue, enqueue, dequeue, clearQueue, isBusy, usageSummary, generateProjectName, getContextInfo, claimBrowser, resolveBrowser, shotPath } from './agent.js';
@@ -22,7 +22,7 @@ import { summary as usageLogSummary, readLog, backfillIfNeeded } from './usagelo
 import { turnLabel, listSessions, createSession, renameSession, deleteSession, setCurrentSession, loadHistory, clearHistory, lastChatAt, appendHistory } from './sessions.js';
 import { zipProject, dockerInfo, imageInfo, buildImage, isBuilding, saveImage, runHints } from './export.js';
 import zlib from 'node:zlib';
-import { authMiddleware, authRouter, checkRequest, startupProblem, HOST, isLoopbackHost, passwordEnabled, oidcConfig } from './auth.js';
+import { authMiddleware, authRouter, checkRequest, startupProblem, HOST, isLoopbackHost, passwordEnabled, oidcConfig, oidcProblem, frameGuard, legacyMiddleware, legacyRedirect } from './auth.js';
 import { listSnapshots, restoreSnapshot } from './snapshots.js';
 
 const app = express();
@@ -34,6 +34,9 @@ const DEMO_PUBLIC_PORT = Number(process.env.SUPERDEMO_DEMO_PUBLIC_PORT || DEMO_P
 app.disable('x-powered-by');
 // behind the edge nginx: X-Forwarded-Proto / X-Real-IP are trusted (secure cookies, redirect URI, login rate limit)
 if (process.env.SUPERDEMO_TRUST_PROXY === '1') app.set('trust proxy', 'loopback, linklocal, uniquelocal');
+// old host:port addresses go to the configured public address (same path); shell pages only framed by the shell
+app.use(legacyMiddleware('app'));
+app.use(frameGuard);
 
 // share links on the shell's own origin: forwarded to the demo origin once its address is known (the direct one when
 // this request came in on the shell's direct address)
@@ -435,6 +438,7 @@ async function boot() {
   const server = app.listen(PORT, HOST, () => {
     const s = getSettings();
     console.log(`\n  SuperDemo 壳已启动:  http://${isLoopbackHost(HOST) ? 'localhost' : HOST}:${PORT}${[oidcConfig() && '统一登录', passwordEnabled() && '访问口令'].filter(Boolean).map(x => `  (已启用${x})`).join('')}`);
+    if (oidcProblem()) console.warn(`  ⚠ ${oidcProblem()}`);
     if (s.publicUrl || s.directUrl) console.log(`  地址: ${[s.publicUrl, s.directUrl && `直连 ${s.directUrl}`].filter(Boolean).join('  ')}`);
     if (s.demoUrl || s.demoDirectUrl) console.log(`  Demo 地址: ${[s.demoUrl, s.demoDirectUrl && `直连 ${s.demoDirectUrl}`].filter(Boolean).join('  ')}`);
     console.log(`  LLM: ${s.baseUrl || '(未配置)'}  model=${s.model || '(未配置)'}  key=${s.apiKey ? maskKey(s.apiKey) : '(未配置)'}`);
@@ -443,6 +447,7 @@ async function boot() {
   // the demo origin: only /p/ (owner preview, key-checked) and /s/ (share links); nothing of the shell lives here
   const demo = express();
   demo.disable('x-powered-by');
+  demo.use(legacyMiddleware('demo')); // old host:port demo addresses -> SUPERDEMO_DEMO_PUBLIC_URL (same path)
   demo.get('/__sd/ping', (req, res) => res.status(204).end()); // reachability probe from the shell UI
   demo.use('/s', shareMiddleware);
   demo.use('/p', demoPreview);
@@ -450,16 +455,19 @@ async function boot() {
   const demoServer = demo.listen(DEMO_PORT, HOST, () => console.log(`  Demo 预览/分享（独立源）: 端口 ${DEMO_PORT}${DEMO_PUBLIC_PORT !== DEMO_PORT ? `（对外 ${DEMO_PUBLIC_PORT}）` : ''}`));
   demoServer.on('error', e => console.error(`  ✗ Demo 端口 ${DEMO_PORT} 无法监听：${e.message}（预览会退回同源模式）`));
   demoServer.on('upgrade', (req, socket, head) => {
+    if (legacyRedirect(req, 'demo')) return socket.destroy(); // old host:port address: pages are redirected, sockets refused
     if (req.url.startsWith('/s/')) { const t = upgradeTarget(req.url); return t ? proxyUpgrade(req, socket, head, t) : socket.destroy(); }
     if (req.url.startsWith('/p/') && demoUpgradeAllowed(req)) return proxyUpgrade(req, socket, head);
     socket.destroy();
   });
   // WebSocket upgrades: /p/<id>/… behind the shell's access control, /s/<token>/… via a live share link
   server.on('upgrade', (req, socket, head) => {
+    if (legacyRedirect(req, 'app')) return socket.destroy();
     if (req.url.startsWith('/s/')) { const t = upgradeTarget(req.url); return t ? proxyUpgrade(req, socket, head, t) : socket.destroy(); }
     const bad = checkRequest(req);
     if (bad) return socket.end(`HTTP/1.1 ${bad.status} ${bad.status === 401 ? 'Unauthorized' : 'Forbidden'}\r\n\r\n`);
-    if (req.url.startsWith('/p/')) return proxyUpgrade(req, socket, head);
+    // previews run on the demo origin when there is one; the shell origin serves them only in the legacy fallback
+    if (req.url.startsWith('/p/') && !previewOrigin(req)) return proxyUpgrade(req, socket, head);
     socket.destroy();
   });
 }

@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import { verifyIdToken, pickOrigin, safeNext, seal, unseal, serverSide } from '../shell/oidc.js';
-import { stripSessionCookie } from '../shell/auth.js';
+import { stripSessionCookie, dropForbiddenSetCookies } from '../shell/auth.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const PASSWORD = 'correct horse battery staple';
@@ -47,7 +47,7 @@ function startIdp() {
         if (!c || f.get('client_id') !== CLIENT.id || f.get('client_secret') !== CLIENT.secret || f.get('redirect_uri') !== c.redirectUri) return json(400, { error: 'invalid_grant' });
         if (crypto.createHash('sha256').update(f.get('code_verifier') || '').digest('base64url') !== c.challenge) return json(400, { error: 'invalid_grant', error_description: 'PKCE' });
         const now = Math.floor(Date.now() / 1000);
-        const claims = { iss: idp.issuer, aud: CLIENT.id, sub: 'user-1', nonce: c.nonce, exp: now + 300, iat: now, owner: idp.knobs.owner ?? 'internal', email: 'ckj1@vip.qq.com', preferred_username: 'ckj' };
+        const claims = { iss: idp.issuer, aud: CLIENT.id, sub: 'user-1', nonce: c.nonce, exp: now + 300, iat: now, owner: idp.knobs.owner === undefined ? 'internal' : idp.knobs.owner ?? undefined, email: 'ckj1@vip.qq.com', preferred_username: 'ckj' };
         json(200, { access_token: 'at-' + crypto.randomBytes(8).toString('hex'), id_token: idp.knobs.badKey ? sign(claims, other.privateKey) : sign(claims) });
       });
     }
@@ -83,10 +83,42 @@ async function oidcLogin() {
   const pending = cookiesOf(start).sd_oidc;
   assert.ok(pending, 'pending cookie');
   const pc = start.headers.getSetCookie().find(c => c.startsWith('sd_oidc='));
-  assert.match(pc, /Path=\/auth\/oidc;/); assert.match(pc, /HttpOnly/); assert.match(pc, /SameSite=Lax/);
+  assert.match(pc, /Path=\/;/); assert.match(pc, /HttpOnly/); assert.match(pc, /SameSite=Lax/);
   const a = authorize(start.headers.get('location'));
   assert.equal(a.redirectUri, `${BASE}/auth/oidc/callback`);
   return { pending, ...a };
+}
+
+const extra = []; // more shells started by single tests
+function startShell(env, { port, demoPort, data } = {}) {
+  const proc = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'shell/server.js'], {
+    cwd: ROOT, stdio: 'ignore',
+    env: { ...process.env, PORT: String(port), SUPERDEMO_DEMO_PORT: String(demoPort), HOST: '127.0.0.1', SUPERDEMO_PASSWORD: '',
+      SUPERDEMO_OIDC_ISSUER: '', SUPERDEMO_OIDC_CLIENT_ID: '', SUPERDEMO_OIDC_CLIENT_SECRET: '', SUPERDEMO_OIDC_ORGANIZATION: '', SUPERDEMO_TRUST_PROXY: '',
+      SUPERDEMO_PUBLIC_URL: '', SUPERDEMO_DIRECT_URL: '', SUPERDEMO_DEMO_PUBLIC_URL: '', SUPERDEMO_DEMO_DIRECT_URL: '', SUPERDEMO_DEMO_URL: '', SUPERDEMO_SESSION_SECRET: '',
+      SUPERDEMO_PROJECTS_DIR: path.join(data, 'projects'), SUPERDEMO_DATA_DIR: path.join(data, 'data'), LLM_API_KEY: '', LLM_BASE_URL: '', LLM_MODEL: '', ...env },
+  });
+  return proc;
+}
+async function waitUp(base) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < 20000) { try { if ((await fetch(base + '/api/health')).ok) return; } catch {} await sleep(150); }
+  throw new Error('not up: ' + base);
+}
+/** Raw request (fetch() won't let a test set Host / Sec-Fetch-Mode). */
+const raw = (url, headers = {}, method = 'GET', body) => new Promise((ok, no) => {
+  const r = http.request(url, { method, headers }, res => { let b = ''; res.on('data', c => { b += c; }); res.on('end', () => { res.body = b; ok(res); }); });
+  r.on('error', no); r.end(body);
+});
+/** Project whose page echoes the cookies it got and tries to plant the shell's cookies. */
+async function echoProject(base, dataDir, headers) {
+  const p = await (await fetch(base + '/api/projects', { method: 'POST', headers, body: JSON.stringify({ name: 'echo', description: 'echo', type: 'web' }) })).json();
+  assert.ok(p.id, JSON.stringify(p));
+  const dir = path.join(dataDir, 'projects', p.id);
+  const entry = JSON.parse(fs.readFileSync(path.join(dir, 'project.json'), 'utf8')).entry;
+  fs.writeFileSync(path.join(dir, entry), `import http from 'node:http'; http.createServer((q,s)=>{s.setHeader('set-cookie',['__Host-sd_session=planted; Path=/; Secure','sd_session=planted','x=1; Domain=mmkj.site','ok=1; Path=/']);s.setHeader('content-type','text/html');s.end('<html><head></head><body>COOKIE['+(q.headers.cookie||'')+']</body></html>')}).listen(process.env.PORT,'127.0.0.1');`);
+  await fetch(`${base}/api/projects/${p.id}/restart`, { method: 'POST', headers });
+  return p;
 }
 
 before(async () => {
@@ -94,18 +126,13 @@ before(async () => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-auth-'));
   [PORT, DEMO_PORT] = [await freePort(), await freePort()];
   BASE = `http://127.0.0.1:${PORT}`; DEMO = `http://127.0.0.1:${DEMO_PORT}`;
-  shell = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'shell/server.js'], {
-    cwd: ROOT, stdio: 'ignore',
-    env: { ...process.env, PORT: String(PORT), SUPERDEMO_DEMO_PORT: String(DEMO_PORT), HOST: '127.0.0.1', SUPERDEMO_PASSWORD: PASSWORD,
-      SUPERDEMO_OIDC_ISSUER: idp.issuer, SUPERDEMO_OIDC_CLIENT_ID: CLIENT.id, SUPERDEMO_OIDC_CLIENT_SECRET: CLIENT.secret, SUPERDEMO_OIDC_ORGANIZATION: 'internal',
-      SUPERDEMO_TRUST_PROXY: '1', SUPERDEMO_PUBLIC_URL: BASE, SUPERDEMO_DIRECT_URL: `http://localhost:${PORT}`,
-      SUPERDEMO_DEMO_PUBLIC_URL: DEMO, SUPERDEMO_DEMO_DIRECT_URL: `http://localhost:${DEMO_PORT}`,
-      SUPERDEMO_PROJECTS_DIR: path.join(tmp, 'projects'), SUPERDEMO_DATA_DIR: path.join(tmp, 'data'), LLM_API_KEY: '', LLM_BASE_URL: '', LLM_MODEL: '' },
-  });
-  const t0 = Date.now();
-  while (Date.now() - t0 < 20000) { try { if ((await fetch(BASE + '/api/health')).ok) break; } catch {} await sleep(150); }
+  shell = startShell({ SUPERDEMO_PASSWORD: PASSWORD,
+    SUPERDEMO_OIDC_ISSUER: idp.issuer, SUPERDEMO_OIDC_CLIENT_ID: CLIENT.id, SUPERDEMO_OIDC_CLIENT_SECRET: CLIENT.secret, SUPERDEMO_OIDC_ORGANIZATION: 'internal',
+    SUPERDEMO_TRUST_PROXY: '1', SUPERDEMO_PUBLIC_URL: BASE, SUPERDEMO_DIRECT_URL: `http://localhost:${PORT}`,
+    SUPERDEMO_DEMO_PUBLIC_URL: DEMO, SUPERDEMO_DEMO_DIRECT_URL: `http://localhost:${DEMO_PORT}` }, { port: PORT, demoPort: DEMO_PORT, data: tmp });
+  await waitUp(BASE);
 });
-after(() => { shell?.kill(); idp.server?.close(); try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} });
+after(() => { shell?.kill(); for (const p of extra) p.kill(); idp.server?.close(); try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} });
 
 // ---------- protocol units ----------
 test('ID token checks: signature, iss, aud, nonce, exp', () => {
@@ -239,13 +266,7 @@ test('CSRF: signed-in writes from another origin or as a form are refused', asyn
 test('share links work without login; the project never sees the session; 直连 switch on the relay demo address', async () => {
   const cookie = `sd_session=${cookiesOf(await passwordLogin()).sd_session}`;
   const json = { cookie, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' };
-  const p = await (await get('/api/projects', { method: 'POST', headers: json, body: JSON.stringify({ name: 'auth', description: 'auth', type: 'web' }) })).json();
-  assert.ok(p.id, JSON.stringify(p));
-  // the project echoes the cookies it receives
-  const dir = path.join(tmp, 'projects', p.id);
-  const entry = JSON.parse(fs.readFileSync(path.join(dir, 'project.json'), 'utf8')).entry;
-  fs.writeFileSync(path.join(dir, entry), `import http from 'node:http'; http.createServer((q,s)=>{s.setHeader('content-type','text/html');s.end('<html><head></head><body>COOKIE['+(q.headers.cookie||'')+']</body></html>')}).listen(process.env.PORT,'127.0.0.1');`);
-  await get(`/api/projects/${p.id}/restart`, { method: 'POST', headers: json });
+  const p = await echoProject(BASE, tmp, json);
   const share = await (await get(`/api/projects/${p.id}/shares`, { method: 'POST', headers: json, body: '{}' })).json();
   assert.ok(share.token);
   let r, html;
@@ -269,4 +290,119 @@ test('share links work without login; the project never sees the session; 直连
   const s = await (await get('/api/settings', { headers: { cookie } })).json();
   assert.deepEqual([s.publicUrl, s.demoUrl, s.directUrl, s.demoDirectUrl, s.urlsLocked.demoUrl], [BASE, DEMO, `http://localhost:${PORT}`, `http://localhost:${DEMO_PORT}`, true]);
   await get(`/api/projects/${p.id}/stop`, { method: 'POST', headers: json });
+});
+
+// ---------- security review fixes ----------
+test('safeNext: only a single leading slash, no backslash or control characters anywhere', () => {
+  for (const bad of ['/\t/evil.example', '/\\evil.example', '/x\\y', '/a\nb', '/a\x00b', '//evil', 'evil', '', '/' + 'a'.repeat(600)]) assert.equal(safeNext(bad), '/', JSON.stringify(bad));
+  assert.equal(safeNext('/p/x?y=1#z'), '/p/x?y=1#z');
+});
+
+test('Set-Cookie from projects cannot plant the shell cookies or other hosts\' cookies', () => {
+  assert.deepEqual(dropForbiddenSetCookies(['__Host-sd_session=x; Path=/; Secure', 'sd_session=x', 'sd_oidc=x', '__Host-other=1', 'a=1; Domain=mmkj.site', 'ok=1; Path=/']), ['ok=1; Path=/']);
+  assert.equal(dropForbiddenSetCookies('sd_session=x'), undefined);
+  assert.equal(stripSessionCookie('__Host-sd_session=a; keep=1; __Host-sd_oidc=b'), 'keep=1');
+});
+
+test('统一登录 fails closed: no organization claim -> refused', async () => {
+  const l = await oidcLogin();
+  idp.knobs.owner = null;
+  const r = await get(`/auth/oidc/callback?code=${l.code}&state=${l.state}`, { headers: { cookie: `sd_oidc=${l.pending}` } });
+  idp.knobs = {};
+  assert.equal(r.headers.get('location'), '/login?oidc_error=no_account');
+});
+
+test('shell headers: frame-ancestors self + X-Frame-Options; legacy host:port addresses go to the public ones', async () => {
+  for (const p of ['/login', '/api/health']) {
+    const r = await get(p);
+    assert.equal(r.headers.get('content-security-policy'), "frame-ancestors 'self'");
+    assert.equal(r.headers.get('x-frame-options'), 'SAMEORIGIN');
+  }
+  const app = await raw(`${BASE}/s/abc/x?y=1`, { host: 'n7.mmkj.site:8788' });
+  assert.equal(app.statusCode, 302);
+  assert.equal(app.headers.location, `${BASE}/s/abc/x?y=1`);
+  assert.equal((await raw(`${BASE}/`, { host: 'n7.mmkj.site:8788' })).headers.location, `${BASE}/`);
+  const demo = await raw(`${DEMO}/s/abc/?z=2`, { host: 'n7.mmkj.site:8789' });
+  assert.equal(demo.statusCode, 302);
+  assert.equal(demo.headers.location, `${DEMO}/s/abc/?z=2`);
+  assert.equal((await raw(`${DEMO}/s/nosuch/`, { host: `localhost:${DEMO_PORT}` })).statusCode, 404); // configured hosts are served
+});
+
+test('https: __Host- cookies (Secure, Path=/, no Domain); every same-named cookie is tried', async () => {
+  const r = await get('/auth/password', { method: 'POST', headers: { 'content-type': 'application/json', 'x-real-ip': nextIp(), 'x-forwarded-proto': 'https' }, body: JSON.stringify({ password: PASSWORD }) });
+  const set = r.headers.getSetCookie().find(c => c.startsWith('__Host-sd_session='));
+  assert.ok(set, r.headers.getSetCookie().join(' | '));
+  assert.match(set, /Secure/); assert.match(set, /Path=\/;/); assert.doesNotMatch(set, /Domain=/i);
+  const good = cookiesOf(r)['__Host-sd_session'];
+  const h = c => ({ 'x-forwarded-proto': 'https', cookie: c });
+  assert.equal((await get('/api/projects', { headers: h(`__Host-sd_session=tossed.value; __Host-sd_session=${good}`) })).status, 200);
+  assert.equal((await get('/api/projects', { headers: h(`sd_session=${good}`) })).status, 401); // the http name doesn't count on https
+  const start = await get('/auth/oidc/login', { headers: { 'x-forwarded-proto': 'https' } });
+  assert.ok(start.headers.getSetCookie().some(c => c.startsWith('__Host-sd_oidc=') && /Secure/.test(c) && /Path=\/;/.test(c)));
+});
+
+test('「全部登出」 ends every session; a single logout is persisted', async () => {
+  const a = `sd_session=${cookiesOf(await passwordLogin()).sd_session}`, b = `sd_session=${cookiesOf(await passwordLogin()).sd_session}`;
+  await get('/auth/logout', { method: 'POST', headers: { cookie: a } });
+  const st = JSON.parse(fs.readFileSync(path.join(tmp, 'data', 'auth-state.json'), 'utf8'));
+  assert.equal(Object.keys(st.revoked).length >= 1, true);
+  assert.equal((await get('/api/projects', { headers: { cookie: a } })).status, 401);
+  assert.equal((await get('/api/projects', { headers: { cookie: b } })).status, 200);
+  const c = `sd_session=${cookiesOf(await passwordLogin()).sd_session}`;
+  assert.equal((await get('/auth/logout-all', { method: 'POST', headers: { cookie: c } })).status, 200);
+  assert.equal((await get('/api/projects', { headers: { cookie: b } })).status, 401);
+  assert.equal((await get('/api/projects', { headers: { cookie: c } })).status, 401);
+  assert.equal((await passwordLogin()).status, 200); // new sessions work
+});
+
+test('preview on the shell origin: redirected to the demo origin when there is one, else served sandboxed', async () => {
+  // with a demo origin (main shell): 302 to it, key attached
+  const cookie = `sd_session=${cookiesOf(await passwordLogin()).sd_session}`;
+  const json = { cookie, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' };
+  const p = await (await get('/api/projects', { method: 'POST', headers: json, body: JSON.stringify({ name: 'pv', description: 'pv', type: 'web' }) })).json();
+  const r = await get(`/p/${p.id}/a?b=1`, { headers: { cookie } });
+  assert.equal(r.status, 302);
+  assert.match(r.headers.get('location'), new RegExp(`^${DEMO}/p/${p.id}/a\\?b=1&_sdk=[A-Za-z0-9_-]{24}$`));
+  await get(`/api/projects/${p.id}/stop`, { method: 'POST', headers: json });
+  // without one (legacy, a second shell): sandboxed, no session reaches the project, its cookie planting is dropped
+  const [port, demoPort] = [await freePort(), await freePort()], base = `http://127.0.0.1:${port}`, data = fs.mkdtempSync(path.join(tmp, 'legacy-'));
+  extra.push(startShell({ SUPERDEMO_PASSWORD: PASSWORD }, { port, demoPort, data }));
+  await waitUp(base);
+  const login = await fetch(base + '/auth/password', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: PASSWORD }) });
+  const c2 = `sd_session=${cookiesOf(login).sd_session}`;
+  const q = await echoProject(base, data, { cookie: c2, 'content-type': 'application/json' });
+  let res;
+  for (let i = 0; i < 50; i++) { res = await fetch(`${base}/p/${q.id}/`, { headers: { cookie: `${c2}; keep=1` }, redirect: 'manual' }); if (res.status === 200) break; await sleep(200); }
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-security-policy'), /^sandbox allow-scripts allow-forms allow-popups allow-modals; frame-ancestors 'self'$/);
+  assert.doesNotMatch(res.headers.get('content-security-policy'), /allow-same-origin/);
+  assert.deepEqual(res.headers.getSetCookie(), ['ok=1; Path=/']);
+  const body = await res.text();
+  assert.match(body, /COOKIE\[keep=1\]/);
+  // what a sandboxed page sends: Origin null -> refused even with the cookie
+  assert.equal((await fetch(`${base}/api/projects/${q.id}/sessions`, { method: 'POST', headers: { cookie: c2, origin: 'null', 'content-type': 'application/json' }, body: '{}' })).status, 403);
+  await fetch(`${base}/api/projects/${q.id}/stop`, { method: 'POST', headers: { cookie: c2 } });
+});
+
+test('OIDC without an organization stays off; https public address forces Secure; X-Forwarded-Proto only behind a trusted proxy; new password logs everyone out', async () => {
+  const [port, demoPort] = [await freePort(), await freePort()], base = `http://127.0.0.1:${port}`, data = fs.mkdtempSync(path.join(tmp, 'pw-'));
+  const env = { SUPERDEMO_PASSWORD: 'first-password', SUPERDEMO_PUBLIC_URL: 'https://demo.example.com', SUPERDEMO_SESSION_SECRET: 'test-session-secret',
+    SUPERDEMO_OIDC_ISSUER: idp.issuer, SUPERDEMO_OIDC_CLIENT_ID: CLIENT.id, SUPERDEMO_OIDC_CLIENT_SECRET: CLIENT.secret };
+  let proc = startShell(env, { port, demoPort, data }); extra.push(proc);
+  await waitUp(base);
+  assert.equal((await (await fetch(base + '/auth/me')).json()).methods.oidc, false);
+  const login = (pw, headers = {}) => raw(`${base}/auth/password`, { 'content-type': 'application/json', ...headers }, 'POST', JSON.stringify({ password: pw }));
+  // via the public host name: Secure + __Host- (TLS ends at the proxy, which isn't trusted here)
+  const pub = await login('first-password', { host: 'demo.example.com' });
+  assert.match(pub.headers['set-cookie'][0], /^__Host-sd_session=.*Secure/);
+  // loopback, untrusted X-Forwarded-Proto: plain cookie
+  const loc = await login('first-password', { 'x-forwarded-proto': 'https' });
+  assert.match(loc.headers['set-cookie'][0], /^sd_session=/);
+  assert.doesNotMatch(loc.headers['set-cookie'][0], /Secure/);
+  const old = loc.headers['set-cookie'][0].split(';')[0];
+  assert.equal((await fetch(base + '/api/projects', { headers: { cookie: old } })).status, 200);
+  proc.kill(); await sleep(300);
+  proc = startShell({ ...env, SUPERDEMO_PASSWORD: 'second-password' }, { port, demoPort, data }); extra.push(proc);
+  await waitUp(base);
+  assert.equal((await fetch(base + '/api/projects', { headers: { cookie: old } })).status, 401);
 });

@@ -100,8 +100,10 @@ export function pickOrigin(requestOrigin, allowed) {
 /** Only same-site relative paths survive as the post-login destination. */
 export function safeNext(next) {
   const s = typeof next === 'string' ? next : '';
-  if (!s.startsWith('/') || s.startsWith('//') || s.startsWith('/\\') || /[\r\n]/.test(s)) return '/';
-  return s.slice(0, 500);
+  // a single leading '/', then no second '/', no backslash and no control character anywhere (browsers fold '\\' into '/'
+  // and drop tabs / newlines, which would turn '/\t/evil' into '//evil')
+  if (!/^\/(?!\/)/.test(s) || /[\x00-\x1f\x7f\\]/.test(s) || s.length > 500) return '/';
+  return s;
 }
 
 export function authorizeUrl(doc, cfg, p) {
@@ -178,7 +180,7 @@ async function jwks(doc, fetchFn, refresh = false) {
 // ---------- the callback ----------
 /**
  * Exchanges the code, checks the ID token, reads userinfo. Throws with a readable (Chinese) message.
- * `cfg.organization` (optional): the Casdoor organization the account must belong to (claim `owner`, when present).
+ * `cfg.organization` (required): the Casdoor organization the account must belong to (claim `owner` of the ID token or userinfo).
  */
 export async function completeLogin(cfg, input, fetchFn = fetch, now = Date.now()) {
   const doc = await discover(cfg, fetchFn);
@@ -205,8 +207,11 @@ export async function completeLogin(cfg, input, fetchFn = fetch, now = Date.now(
     if (info.sub !== undefined && String(info.sub) !== String(claims.sub)) throw new Error('userinfo 与 ID token 不是同一个用户');
   }
   if (claims.isForbidden === true || info.isForbidden === true) throw new OidcError('disabled', `account ${claims.sub} is forbidden at the IdP`);
-  if (cfg.organization && typeof claims.owner === 'string' && claims.owner !== cfg.organization) {
-    throw new OidcError('no_account', `account ${claims.sub} belongs to organization ${claims.owner}, not ${cfg.organization}`);
+  // the organization is required (fail closed): the account must say which one it belongs to, and it must be ours
+  const owner = claims.owner ?? info.owner;
+  if (!cfg.organization) throw new OidcError('not_configured', 'no organization configured');
+  if (typeof owner !== 'string' || owner !== cfg.organization) {
+    throw new OidcError('no_account', `account ${claims.sub} belongs to organization ${owner === undefined ? '(none given)' : owner}, not ${cfg.organization}`);
   }
   const pick = k => String(info[k] ?? claims[k] ?? '').trim();
   return {

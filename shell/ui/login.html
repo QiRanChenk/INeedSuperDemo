@@ -45,7 +45,9 @@
 (async () => {
   if (await window.sdDirect) return; // moving to the direct address; sign in there (cookies are per host)
   const q = new URLSearchParams(location.search);
-  const next = (q.get('next') || '/').startsWith('/') && !(q.get('next') || '').startsWith('//') ? q.get('next') || '/' : '/';
+  // only a path on this very origin (anything else, incl. '//x', '/\\x' or control characters, becomes '/')
+  const sameOrigin = v => { try { const u = new URL(v, location.origin); return /^\/(?!\/)/.test(v) && !/[\x00-\x1f\x7f\\]/.test(v) && u.origin === location.origin ? u.pathname + u.search + u.hash : null; } catch { return null; } };
+  const next = sameOrigin(q.get('next') || '/') || '/';
   const $ = id => document.getElementById(id);
   const say = (t, info) => { $('msg').textContent = t; $('msg').className = 'msg' + (info ? ' info' : ''); };
   const ERRORS = {
@@ -85,7 +87,7 @@
         const j = await r.json().catch(() => ({}));
         if (!r.ok) { say(j.error || '登录失败'); $('password').select(); return; }
         localStorage.setItem('sd.login', 'password');
-        location.replace(j.next || '/');
+        location.replace(sameOrigin(j.next || '/') || '/');
       } catch { say('连不上服务器，请稍后再试。'); }
       finally { btn.disabled = false; }
     };
